@@ -1,0 +1,69 @@
+/* ============================================================
+ * sw.js — 서비스 워커: 앱 파일을 캐시해서 오프라인에서도 동작
+ *  - 파일을 수정해서 다시 배포할 때는 CACHE_VERSION 숫자를 올려 주세요.
+ * ============================================================ */
+
+const CACHE_VERSION = 'v1';
+const CACHE_NAME = `wordbook-${CACHE_VERSION}`;
+
+// 오프라인에서 필요한 모든 파일 (상대 경로라 GitHub Pages 하위 폴더에서도 동작)
+const APP_FILES = [
+  './',
+  './index.html',
+  './manifest.json',
+  './css/style.css',
+  './js/storage.js',
+  './js/ui.js',
+  './js/speech.js',
+  './js/samples.js',
+  './js/words.js',
+  './js/list.js',
+  './js/quiz.js',
+  './js/backup.js',
+  './js/app.js',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+  './icons/apple-touch-icon.png'
+];
+
+// 설치: 앱 파일 미리 캐시
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(APP_FILES))
+      .then(() => self.skipWaiting())
+  );
+});
+
+// 활성화: 예전 버전 캐시 삭제
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('wordbook-') && k !== CACHE_NAME).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+// 요청 처리: 캐시 우선, 없으면 네트워크 (받은 파일은 캐시에 추가)
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+
+  event.respondWith(
+    caches.match(req, { ignoreSearch: true }).then(cached => {
+      if (cached) return cached;
+      return fetch(req).then(res => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
+        }
+        return res;
+      }).catch(() => {
+        // 오프라인에서 페이지 이동 요청이면 첫 화면으로
+        if (req.mode === 'navigate') return caches.match('./index.html');
+        return Response.error();
+      });
+    })
+  );
+});
