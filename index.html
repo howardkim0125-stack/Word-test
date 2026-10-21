@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>영단어 단어장</title>
   <meta name="description" content="영단어 단어장 + 무작위 테스트">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="#4f46e5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1c1f27" media="(prefers-color-scheme: dark)">
+  <meta name="format-detection" content="telephone=no">
 
   <!-- PWA / iOS 홈 화면 앱 설정 -->
   <link rel="manifest" href="manifest.json">
@@ -22,13 +24,22 @@
   <header class="app-header">
     <h1 class="app-title">영단어 단어장</h1>
     <nav class="tabs" role="tablist">
-      <button class="tab" data-tab="add" role="tab">단어 등록</button>
-      <button class="tab" data-tab="list" role="tab">라이브러리</button>
-      <button class="tab" data-tab="test" role="tab">테스트</button>
-      <button class="tab" data-tab="stats" role="tab">통계</button>
-      <button class="tab" data-tab="settings" role="tab">설정</button>
+      <button class="tab" data-tab="add" role="tab"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8v8M8 12h8"/></svg><span class="tab-label">단어 등록</span></button>
+      <button class="tab" data-tab="list" role="tab"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h11a2 2 0 0 1 2 2V20H7a2 2 0 0 1-2-2z"/><path d="M5 18a2 2 0 0 1 2-2h11"/><path d="M9 8h5"/></svg><span class="tab-label">라이브러리</span></button>
+      <button class="tab" data-tab="test" role="tab"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 12.5l2 2 4-4.5"/></svg><span class="tab-label">테스트</span></button>
+      <button class="tab" data-tab="stats" role="tab"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16"/><path d="M7.5 16v-4M12 16V7M16.5 16v-7"/></svg><span class="tab-label">통계</span></button>
+      <button class="tab" data-tab="settings" role="tab"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg><span class="tab-label">설정</span></button>
     </nav>
   </header>
+
+  <!-- 앱 설치 안내 배너 (휴대폰·태블릿 브라우저에서) -->
+  <div id="install-banner" class="banner banner-info" hidden>
+    <span id="install-banner-text">홈 화면에 추가하면 앱처럼 쓸 수 있어요.</span>
+    <div class="banner-actions">
+      <button class="btn btn-small btn-primary" id="install-banner-btn" hidden>앱 설치</button>
+      <button class="btn btn-small" id="install-banner-close">닫기</button>
+    </div>
+  </div>
 
   <!-- 새 버전 알림 배너 -->
   <div id="update-banner" class="banner banner-info" hidden>
@@ -394,8 +405,10 @@
 
       <div class="card">
         <h2>앱</h2>
-        <p class="hint">화면이 이상하거나 새 버전이 안 보이면 눌러 주세요. 단어 데이터는 지워지지 않아요.</p>
+        <p class="install-status" id="install-status"></p>
+        <p class="hint">화면이 이상하거나 새 버전이 안 보이면 ‘앱 새로고침’을 눌러 주세요. 단어 데이터는 지워지지 않아요.</p>
         <div class="btn-row">
+          <button class="btn btn-primary" id="install-btn" hidden>앱으로 설치</button>
           <button class="btn" id="refresh-app-btn">앱 새로고침 (캐시 갱신)</button>
         </div>
       </div>
