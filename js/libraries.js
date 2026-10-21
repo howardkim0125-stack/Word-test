@@ -2,7 +2,7 @@
  * libraries.js — 라이브러리 (스포티파이 플레이리스트처럼 단어 묶음)
  *  - 단어는 하나만 저장하고, 라이브러리는 단어 ID 목록만 가짐
  *  - 한 단어가 여러 라이브러리에 들어갈 수 있음
- *  - 'all' = 모든 단어 (가상의 라이브러리)
+ *  - 'all' = 모든 단어, 'auto:…' = 자동 목록 (둘 다 가상의 라이브러리, review.js)
  * ============================================================ */
 
 // 표지 색 (그라데이션 두 색)
@@ -29,17 +29,24 @@ function getLibrary(id) {
   return state.libraries.find(l => l.id === id) || null;
 }
 
-/** 라이브러리에 든 단어 목록 ('all'이면 전체) */
+/** 라이브러리에 든 단어 목록 ('all'이면 전체, 자동 목록은 지금 데이터로 계산) */
 function libraryWords(libId) {
   if (libId === 'all') return state.words;
+  if (isAutoList(libId)) return autoListWords(libId);
   const lib = getLibrary(libId);
   if (!lib) return [];
   const ids = new Set(lib.wordIds);
   return state.words.filter(w => ids.has(w.id));
 }
 
+/** 라이브러리(또는 '모든 단어', 자동 목록)가 있는지 */
+function libraryExists(libId) {
+  return libId === 'all' || !!getAutoList(libId) || !!getLibrary(libId);
+}
+
 function libraryName(libId) {
   if (libId === 'all') return '모든 단어';
+  if (isAutoList(libId)) return getAutoList(libId)?.name || '자동 목록';
   return getLibrary(libId)?.name || '(삭제된 라이브러리)';
 }
 
@@ -132,6 +139,9 @@ function deleteLibrary(libId, withWords) {
   }
   saveLibraries();
   if (state.settings.testLibrary === libId) state.settings.testLibrary = 'all';
+  state.settings.testScope = state.settings.testScope.filter(x => x !== libId);
+  if (!state.settings.testScope.length) state.settings.testScope = ['all'];
+  delete state.settings.scopeSettings[libId];
   if (state.settings.addLibrary === libId) state.settings.addLibrary = '__default__';
   if (state.settings.defaultLibrary === libId) state.settings.defaultLibrary = ''; // 다음에 담을 때 다시 만듦
   saveSettings();
@@ -196,15 +206,25 @@ function renderLibraryHome() {
       ${coverHtml(ALL_COVER)}
       <span class="lib-card-name">모든 단어</span>
       <span class="lib-card-meta">단어 ${state.words.length}개</span>
+      ${masteryBarHtml(state.words)}
     </button>`,
     ...state.libraries.map(l => `
       <button class="lib-card" data-lib="${l.id}">
         ${coverHtml(l)}
         <span class="lib-card-name">${escapeHtml(l.name)}</span>
         <span class="lib-card-meta">${l.packId ? '단어팩 · ' : ''}단어 ${l.wordIds.length}개</span>
+        ${masteryBarHtml(libraryWords(l.id))}
       </button>`)
   ];
   $('#lib-grid').innerHTML = cards.join('');
+
+  // 자동 목록: 항상 지금 데이터로 계산
+  $('#auto-grid').innerHTML = AUTO_LISTS.map(a => `
+    <button class="lib-card auto-card" data-lib="${a.id}">
+      ${coverHtml({ name: `${a.icon} ${a.name}`, color: a.color }, 'lib-cover-auto')}
+      <span class="lib-card-name">${escapeHtml(a.name)}</span>
+      <span class="lib-card-meta">단어 ${autoListWords(a.id).length}개</span>
+    </button>`).join('');
 
   $('#pack-grid').innerHTML = WORD_PACKS.map(p => {
     const installed = installedLibraryOfPack(p.id);
@@ -226,7 +246,8 @@ function showLibraryHome() {
 /* ---------- 화면: 라이브러리 상세 ---------- */
 
 function openLibrary(libId) {
-  if (libId !== 'all' && !getLibrary(libId)) libId = 'all';
+  if (!libraryExists(libId)) libId = 'all';
+  if (typeof exitSelectMode === 'function') exitSelectMode(false);
   currentLibId = libId;
   $('#lib-home').hidden = true;
   $('#lib-detail').hidden = false;
@@ -238,16 +259,24 @@ function openLibrary(libId) {
 
 function renderLibraryHero() {
   const isAll = currentLibId === 'all';
-  const lib = isAll ? null : getLibrary(currentLibId);
-  const info = isAll ? ALL_COVER : lib;
+  const auto = getAutoList(currentLibId);
+  const lib = isAll || auto ? null : getLibrary(currentLibId);
+  const info = isAll ? ALL_COVER : auto ? { name: `${auto.icon} ${auto.name}`, color: auto.color } : lib;
   $('#lib-hero-cover').outerHTML = coverHtml(info, 'lib-cover-large').replace('<div class="lib-cover', '<div id="lib-hero-cover" class="lib-cover');
-  $('#lib-hero-kind').textContent = isAll ? '전체 단어장' : (lib.packId ? '단어팩 라이브러리' : '라이브러리');
-  $('#lib-hero-name').textContent = info.name;
-  const count = libraryWords(currentLibId).length;
-  $('#lib-hero-desc').textContent = (isAll ? '등록한 모든 단어' : (lib.desc || '')) + ` · 단어 ${count}개`;
-  $('#lib-edit-btn').hidden = isAll;
-  $('#lib-delete-btn').hidden = isAll;
-  $('#lib-test-btn').disabled = count === 0;
+  $('#lib-hero-kind').textContent = isAll ? '전체 단어장' : auto ? '자동 목록' : (lib.packId ? '단어팩 라이브러리' : '라이브러리');
+  $('#lib-hero-name').textContent = auto ? auto.name : info.name;
+  const words = libraryWords(currentLibId);
+  const desc = isAll ? '등록한 모든 단어' : auto ? auto.desc : (lib.desc || '');
+  $('#lib-hero-desc').textContent = [desc, `단어 ${words.length}개`].filter(Boolean).join(' · ');
+  $('#lib-hero-progress').innerHTML = words.length ? masteryBarHtml(words, true) : '';
+  // 마지막 시험
+  const last = lastHistory(currentLibId);
+  $('#lib-hero-last').textContent = last ? `마지막 시험: ${formatShortDate(last.at)} · ${scoreText(last)}` : '아직 시험 기록이 없어요';
+  $('#lib-history-btn').hidden = !last;
+  $('#lib-edit-btn').hidden = !lib;
+  $('#lib-delete-btn').hidden = !lib;
+  $('#lib-add-words-btn').hidden = !!auto;
+  $('#lib-test-btn').disabled = words.length === 0;
 }
 
 /** 새 라이브러리 / 편집 대화상자. 만든(수정한) 라이브러리 반환 */
@@ -426,15 +455,15 @@ function isInDefaultLibrary(wordId) {
 /** 라이브러리 탭에 들어올 때 */
 function onEnterLibraryView() {
   if ($('#lib-detail').hidden) renderLibraryHome();
-  else if (currentLibId !== 'all' && !getLibrary(currentLibId)) showLibraryHome();
+  else if (!libraryExists(currentLibId)) showLibraryHome();
   else { renderLibraryHero(); renderList(); }
 }
 
 function initLibraryView() {
-  $('#lib-grid').addEventListener('click', e => {
+  ['#lib-grid', '#auto-grid'].forEach(sel => $(sel).addEventListener('click', e => {
     const card = e.target.closest('[data-lib]');
     if (card) openLibrary(card.dataset.lib);
-  });
+  }));
   $('#pack-grid').addEventListener('click', e => {
     const card = e.target.closest('[data-pack]');
     if (card) openPackPreview(card.dataset.pack);
@@ -449,15 +478,9 @@ function initLibraryView() {
     if (lib) renderLibraryHero();
   });
   $('#lib-delete-btn').addEventListener('click', () => confirmDeleteLibrary(currentLibId));
-  $('#lib-test-btn').addEventListener('click', async () => {
-    const inProgress = quiz && (quiz.phase === 'answer' || quiz.phase === 'feedback');
-    if (inProgress && !(await confirmDialog('진행 중인 테스트', '풀던 테스트를 그만두고 이 라이브러리로 새로 시작할까요?\n(풀던 기록은 반영되지 않습니다)', '새로 시작'))) return;
-    state.settings.testLibrary = currentLibId;
-    saveSettings();
-    quiz = null;
-    showTestPanel('setup');
-    switchTab('test');
-  });
+  // ▶ 테스트: 이 라이브러리의 마지막 시험 설정으로 바로 시작
+  $('#lib-test-btn').addEventListener('click', () => startScopeTest([currentLibId]));
+  $('#lib-history-btn').addEventListener('click', () => openHistoryDialog(currentLibId));
   $('#lib-add-words-btn').addEventListener('click', () => {
     state.settings.addLibrary = currentLibId === 'all' ? '' : currentLibId;
     saveSettings();

@@ -111,6 +111,12 @@
         <div class="lib-grid" id="lib-grid"></div>
 
         <div class="section-head">
+          <h2>자동 목록</h2>
+        </div>
+        <p class="hint">시험 기록으로 항상 새로 계산돼요. 눌러서 보고 ▶ 테스트할 수 있어요.</p>
+        <div class="lib-grid" id="auto-grid"></div>
+
+        <div class="section-head">
           <h2>수능·모의고사 빈출 단어팩</h2>
         </div>
         <p class="hint">수능·학력평가 영어 지문에 자주 나오는 어휘를 묶었어요. 누르면 미리 보고 내 라이브러리에 추가할 수 있어요.</p>
@@ -126,6 +132,9 @@
             <p class="lib-kind" id="lib-hero-kind"></p>
             <h2 class="lib-hero-name" id="lib-hero-name"></h2>
             <p class="hint" id="lib-hero-desc"></p>
+            <div class="lib-hero-progress" id="lib-hero-progress"></div>
+            <p class="lib-hero-last"><span id="lib-hero-last"></span>
+              <button class="btn btn-small" id="lib-history-btn">시험 기록</button></p>
             <div class="btn-row lib-hero-actions">
               <button class="btn btn-primary" id="lib-test-btn">▶ 테스트</button>
               <button class="btn" id="lib-add-words-btn">＋ 단어 추가</button>
@@ -144,10 +153,33 @@
             <option value="accuracy">정답률 낮은순</option>
             <option value="wrong">오답 많은순</option>
           </select>
+          <select id="list-mastery" aria-label="숙련도">
+            <option value="">숙련도 전체</option>
+            <option value="new">새 단어</option>
+            <option value="learning">학습 중</option>
+            <option value="known">외움</option>
+          </select>
+          <button class="btn" id="select-mode-btn">선택</button>
+        </div>
+        <div class="select-tools" id="select-tools" hidden>
+          <button class="btn btn-small" id="sel-all">전체 선택</button>
+          <button class="btn btn-small" id="sel-none">해제</button>
+          <button class="btn btn-small" id="sel-known">외운 단어만 선택</button>
+          <button class="btn btn-small btn-primary" id="sel-done">완료</button>
         </div>
         <p class="list-count" id="list-count"></p>
         <ul class="word-list" id="word-list"></ul>
         <p class="empty" id="list-empty" hidden></p>
+
+        <!-- 편집 모드 하단 고정 바 -->
+        <div class="select-bar" id="select-bar" hidden>
+          <span class="select-count" id="select-count">0개 선택</span>
+          <div class="select-actions">
+            <button class="btn" id="sel-add">라이브러리에 담기</button>
+            <button class="btn" id="sel-remove">빼기</button>
+            <button class="btn btn-danger" id="sel-delete">삭제</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -165,8 +197,8 @@
         <h2>테스트 설정</h2>
 
         <div class="option-group">
-          <span class="option-label">출제 범위</span>
-          <select id="test-library" aria-label="출제 범위"></select>
+          <span class="option-label">출제 범위 <small class="hint-inline">(여러 개 고르면 합쳐서 출제 · ▶ 바로 시작)</small></span>
+          <ul class="scope-list" id="scope-list"></ul>
         </div>
 
         <div class="option-group">
@@ -255,12 +287,16 @@
           <h3>틀린 단어</h3>
           <div class="table-wrap">
             <table class="result-table">
-              <thead><tr><th>문제</th><th>내 답</th><th>정답</th></tr></thead>
+              <thead><tr><th>문제</th><th>내 답</th><th>정답</th><th><span class="sr-only">발음</span></th></tr></thead>
               <tbody id="result-wrong-body"></tbody>
             </table>
           </div>
         </div>
         <p class="hint" id="result-perfect" hidden>🎉 모두 맞혔어요!</p>
+        <div class="result-actions result-sub-actions">
+          <button class="btn" id="wrong-note-btn">틀린 단어를 '오답 노트'에 담기</button>
+          <button class="btn" id="mark-known-btn">맞힌 단어 외움으로 표시</button>
+        </div>
         <div class="result-actions">
           <button class="btn btn-primary btn-large" id="retry-wrong-btn">틀린 것만 다시 풀기</button>
           <button class="btn btn-large" id="new-test-btn">새 테스트</button>
@@ -339,6 +375,8 @@
   <script src="js/dict-data.js"></script>
   <script src="js/dict.js"></script>
   <script src="js/words.js"></script>
+  <script src="js/review.js"></script>
+  <script src="js/history.js"></script>
   <script src="js/libraries.js"></script>
   <script src="js/list.js"></script>
   <script src="js/register.js"></script>

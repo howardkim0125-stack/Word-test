@@ -14,6 +14,7 @@ function switchTab(name) {
     t.setAttribute('aria-selected', active);
   });
   $$('.view').forEach(v => { v.hidden = v.id !== `view-${name}`; });
+  if (name !== 'list' && selectMode) exitSelectMode(false); // 다른 탭으로 가면 편집 모드 끝
   try { sessionStorage.setItem(TAB_KEY, name); } catch (e) { /* 무시 */ }
 
   // 탭에 들어올 때 최신 데이터로 다시 그리기
@@ -26,7 +27,7 @@ function switchTab(name) {
 
 /** 데이터가 크게 바뀌었을 때(가져오기 등) 전체 화면 갱신 */
 function refreshAllViews() {
-  if (currentLibId !== 'all' && !getLibrary(currentLibId)) showLibraryHome();
+  if (!libraryExists(currentLibId)) showLibraryHome();
   onEnterLibraryView();
   renderAddLibrarySelect();
   renderSettings();

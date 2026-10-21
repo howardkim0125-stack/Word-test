@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   settings: 'wt.settings',
   meta: 'wt.meta', // 마지막 백업 시각, 최초 사용 시각 등
   quizRun: 'wt.quizRun', // 진행 중인 시험 (이어서 풀기)
+  history: 'wt.history', // 시험 기록 (최대 300개)
   recentAdds: 'wt.recentAdds' // 방금 등록한 단어 (되돌리기용)
 };
 
@@ -18,7 +19,9 @@ const DEFAULT_SETTINGS = {
   direction: 'en2ko', // en2ko | ko2en | mix
   format: 'input',    // input(주관식) | choice(객관식) | auto(추천 조합: 영→한 객관식, 한→영 주관식)
   mode: 'random',     // random | weighted
-  testLibrary: 'all', // 출제 범위: 'all'(모든 단어) 또는 라이브러리 ID
+  testLibrary: 'all', // (예전 설정) 출제 범위 하나 — testScope의 첫 번째와 같음
+  testScope: ['all'], // 출제 범위: 'all'(모든 단어), 라이브러리 ID, 자동 목록 ID 여러 개 (합쳐서 출제)
+  scopeSettings: {},  // 라이브러리마다 마지막 시험 설정 { 라이브러리 ID: { direction, format, mode, count } }
   addLibrary: '__default__', // 단어 등록 시 넣을 라이브러리 ID ('' = 없음, '__default__' = 기본 라이브러리)
   defaultLibrary: ''  // ＋ 버튼으로 담는 기본 라이브러리 ID ('' = "외울 단어"를 필요할 때 자동 생성)
 };
@@ -27,6 +30,7 @@ const DEFAULT_SETTINGS = {
 const state = {
   words: [],
   libraries: [],
+  history: [],
   settings: { ...DEFAULT_SETTINGS },
   meta: { lastBackup: null, firstUse: null }
 };
@@ -62,6 +66,8 @@ function loadAll() {
   state.libraries = Array.isArray(libs) ? libs.map(normalizeLibrary).filter(Boolean) : [];
   pruneLibraryWordIds();
   state.settings = normalizeSettings(readJSON(STORAGE_KEYS.settings, {}));
+  const hist = readJSON(STORAGE_KEYS.history, []);
+  state.history = Array.isArray(hist) ? hist.map(normalizeHistoryEntry).filter(Boolean) : [];
   state.meta = { lastBackup: null, firstUse: null, ...readJSON(STORAGE_KEYS.meta, {}) };
   if (!state.meta.firstUse) {
     state.meta.firstUse = Date.now();
@@ -72,6 +78,7 @@ function loadAll() {
 function saveWords() { return writeJSON(STORAGE_KEYS.words, state.words); }
 function saveLibraries() { return writeJSON(STORAGE_KEYS.libraries, state.libraries); }
 function saveSettings() { return writeJSON(STORAGE_KEYS.settings, state.settings); }
+function saveHistory() { return writeJSON(STORAGE_KEYS.history, state.history); }
 function saveMeta() { return writeJSON(STORAGE_KEYS.meta, state.meta); }
 
 /**
@@ -88,12 +95,17 @@ function normalizeSettings(raw) {
   if (!['en2ko', 'ko2en', 'mix'].includes(out.direction)) out.direction = DEFAULT_SETTINGS.direction;
   if (!['input', 'choice', 'auto'].includes(out.format)) out.format = DEFAULT_SETTINGS.format;
   if (!['random', 'weighted'].includes(out.mode)) out.mode = DEFAULT_SETTINGS.mode;
+  // 예전 설정은 출제 범위가 하나(testLibrary)뿐이었음
+  if (!Array.isArray(out.testScope) || !out.testScope.length) out.testScope = [out.testLibrary || 'all'];
+  out.testScope = [...new Set(out.testScope.map(String))];
+  if (!out.scopeSettings || typeof out.scopeSettings !== 'object') out.scopeSettings = {};
   return out;
 }
 
 /**
  * 단어 레코드 형식을 맞춰 줌 (가져오기/구버전 데이터 대비)
- * 형식: { id, word, meanings[], memo, asked, wrong, createdAt, updatedAt, lastTested, sample }
+ * 형식: { id, word, meanings[], memo, asked, wrong, createdAt, updatedAt, lastTested, sample,
+ *         recent[](최근 결과 1=정답 0=오답, 최대 10개), markedKnown(직접 '외움' 표시), lastWrongAt }
  */
 function normalizeWordRecord(r) {
   if (!r || typeof r.word !== 'string' || !r.word.trim()) return null;
@@ -113,7 +125,10 @@ function normalizeWordRecord(r) {
     createdAt: r.createdAt || Date.now(),
     updatedAt: r.updatedAt || r.createdAt || Date.now(),
     lastTested: r.lastTested || null,
-    sample: !!r.sample
+    sample: !!r.sample,
+    recent: Array.isArray(r.recent) ? r.recent.map(x => (x ? 1 : 0)).slice(-10) : [],
+    markedKnown: !!r.markedKnown,
+    lastWrongAt: Number(r.lastWrongAt) || null
   };
 }
 
@@ -134,6 +149,31 @@ function normalizeLibrary(l) {
     createdAt: l.createdAt || Date.now(),
     packId: l.packId || null,
     lastUsedAt: Number(l.lastUsedAt) || 0
+  };
+}
+
+/**
+ * 시험 기록 형식 맞추기
+ * 형식: { id, at, scope[], scopeName, direction, format, mode, retry, total, correct,
+ *         items: [{ wordId, word, ok, dir }] }
+ */
+function normalizeHistoryEntry(h) {
+  if (!h || !Array.isArray(h.items)) return null;
+  const items = h.items
+    .filter(it => it && it.word)
+    .map(it => ({ wordId: String(it.wordId || ''), word: String(it.word), ok: !!it.ok, dir: it.dir === 'ko2en' ? 'ko2en' : 'en2ko' }));
+  return {
+    id: h.id || makeId(),
+    at: Number(h.at) || Date.now(),
+    scope: Array.isArray(h.scope) && h.scope.length ? h.scope.map(String) : ['all'],
+    scopeName: typeof h.scopeName === 'string' ? h.scopeName : '',
+    direction: h.direction || 'en2ko',
+    format: h.format || 'input',
+    mode: h.mode || 'random',
+    retry: !!h.retry,
+    total: items.length,
+    correct: items.filter(it => it.ok).length,
+    items
   };
 }
 

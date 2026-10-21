@@ -21,6 +21,8 @@ const APP_FILES = [
   './js/dict.js',
   './js/libraries.js',
   './js/words.js',
+  './js/review.js',
+  './js/history.js',
   './js/list.js',
   './js/register.js',
   './js/quiz.js',
