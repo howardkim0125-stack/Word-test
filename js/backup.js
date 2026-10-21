@@ -14,7 +14,8 @@ function buildBackupData() {
     settings: state.settings,
     words: state.words,
     libraries: state.libraries,
-    history: state.history
+    history: state.history,
+    daily: state.daily
   };
 }
 
@@ -81,7 +82,8 @@ function parseBackupJson(text) {
   const words = rawWords.map(normalizeWordRecord).filter(Boolean);
   const libraries = data && Array.isArray(data.libraries) ? data.libraries.map(normalizeLibrary).filter(Boolean) : [];
   const history = data && Array.isArray(data.history) ? data.history.map(normalizeHistoryEntry).filter(Boolean) : [];
-  return { words, libraries, history, settings: data && data.settings ? data.settings : null };
+  const daily = data && data.daily && typeof data.daily === 'object' ? normalizeDaily(data.daily) : null;
+  return { words, libraries, history, daily, settings: data && data.settings ? data.settings : null };
 }
 
 /**
@@ -110,7 +112,7 @@ async function importBackupFile(file) {
     await showDialog({ title: '가져오기 실패', message: `올바른 백업 파일이 아닙니다.\n(${e.message})` });
     return;
   }
-  const { words, libraries, history, settings } = parsed;
+  const { words, libraries, history, daily, settings } = parsed;
   if (words.length === 0) { showToast('파일에 단어가 없습니다.'); return; }
 
   const choice = await showDialog({
@@ -132,6 +134,7 @@ async function importBackupFile(file) {
     state.words = dedupeWords(words);
     state.libraries = libraries;
     state.history = history.slice(-HISTORY_MAX);
+    if (daily) state.daily = daily;
     pruneLibraryWordIds();
     if (settings) state.settings = normalizeSettings(settings);
     saveSettings();
@@ -155,11 +158,17 @@ async function importBackupFile(file) {
     });
     mergeLibraries(libraries, idMap);
     mergeHistory(history, idMap);
+    // 날짜별 학습량: 같은 날이 있으면 큰 쪽을 남김 (같은 백업을 두 번 가져와도 두 배가 되지 않게)
+    if (daily) Object.keys(daily).forEach(k => {
+      const cur = state.daily[k];
+      if (!cur || daily[k].n > cur.n) state.daily[k] = daily[k];
+    });
     showToast(`추가 ${added}개, 갱신 ${updated}개`);
   }
   saveWords();
   saveLibraries();
   saveHistory();
+  saveDaily();
   refreshAllViews();
   if (choice === 'replace') showToast(`단어 ${state.words.length}개를 가져왔습니다.`);
 }

@@ -254,6 +254,7 @@ function refreshListView() {
   closeSwipe();
   renderLibraryHero();
   renderList();
+  renderRecommendations();
 }
 
 /** 삭제/빼기 — 확인 없이 바로 하고 되돌리기 토스트 */

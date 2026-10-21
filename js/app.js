@@ -2,7 +2,7 @@
  * app.js — 앱 시작, 탭 전환, 설정 화면, 서비스 워커 등록
  * ============================================================ */
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '2.0.0';
 const TAB_KEY = 'wt.tab';
 
 /* ---------- 탭 전환 ---------- */
@@ -21,6 +21,7 @@ function switchTab(name) {
   if (name === 'list') onEnterLibraryView();
   else if (name === 'add') renderAddLibrarySelect();
   else if (name === 'test') onEnterTestView();
+  else if (name === 'stats') renderStats();
   else if (name === 'settings') renderSettings();
   window.scrollTo(0, 0);
 }
@@ -39,6 +40,11 @@ function refreshAllViews() {
 
 function renderSettings() {
   renderDefaultLibrarySelect();
+  $('#setting-daily-goal').value = String(state.settings.dailyGoal);
+  if ($('#setting-daily-goal').value !== String(state.settings.dailyGoal)) {
+    $('#setting-daily-goal').add(new Option(`${state.settings.dailyGoal}문제`, state.settings.dailyGoal));
+    $('#setting-daily-goal').value = String(state.settings.dailyGoal);
+  }
   renderBackupInfo();
   $('#app-version').textContent = `버전 ${APP_VERSION} · 단어 ${state.words.length}개`;
 }
@@ -83,6 +89,11 @@ function initSettingsView() {
     showToast(`기본 라이브러리: ${defaultLibraryName()}`);
   });
   $('#refresh-app-btn').addEventListener('click', refreshAppCache);
+  $('#setting-daily-goal').addEventListener('change', e => {
+    state.settings.dailyGoal = Number(e.target.value) || DEFAULT_SETTINGS.dailyGoal;
+    saveSettings();
+    showToast(`하루 목표: ${state.settings.dailyGoal}문제`);
+  });
   $('#add-samples-btn').addEventListener('click', () => { addSampleWords(); renderSettings(); });
   $('#remove-samples-btn').addEventListener('click', async () => { await removeSampleWords(); renderSettings(); });
   $('#reset-stats-btn').addEventListener('click', resetAllStats);
@@ -172,6 +183,9 @@ function init() {
   initTestView();
   initSettingsView();
   initBackup();
+  initCards();
+  initRecommendations();
+  initStats();
 
   $$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
   $('#update-apply-btn').addEventListener('click', applyUpdate);

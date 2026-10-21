@@ -693,3 +693,118 @@ body.has-select-bar .toast { bottom: calc(env(safe-area-inset-bottom) + 96px); }
 .speak-cell { width: 56px; }
 .result-sub-actions { margin-top: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ===================== 테스트: 오늘 카드 ===================== */
+.today-card {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--primary-soft), var(--info-soft));
+}
+.today-item { display: flex; flex-direction: column; min-width: 0; }
+.today-item span { font-size: 0.85rem; color: var(--muted); }
+.today-item b { font-size: 1.35rem; }
+.today-item.goal.done b { color: var(--ok); }
+.goal-bar { display: block; height: 6px; margin-top: 4px; border-radius: 999px; background: var(--card); overflow: hidden; }
+.goal-bar span { display: block; height: 100%; width: 0; background: var(--ok); }
+@media (max-width: 700px) {
+  .today-card { grid-template-columns: repeat(3, 1fr); }
+  .today-card .btn { grid-column: 1 / -1; }
+}
+
+/* ===================== 추천 단어 ===================== */
+.rec-section { margin-top: 20px; }
+.rec-section .section-head { margin-top: 0; }
+.rec-list { list-style: none; margin: 0; padding: 0; }
+.rec-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.rec-item:last-child { border-bottom: none; }
+.rec-main { flex: 1; min-width: 0; }
+.rec-main span { color: var(--muted); }
+.rec-main small { display: block; color: var(--primary); font-size: 0.8rem; }
+
+/* ===================== 카드 한 장씩 보기 ===================== */
+.cards-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow-y: auto;
+  background: var(--bg);
+  padding: calc(env(safe-area-inset-top) + 16px) calc(env(safe-area-inset-right) + 16px) calc(env(safe-area-inset-bottom) + 16px) calc(env(safe-area-inset-left) + 16px);
+}
+.cards-inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; min-height: 100%; }
+.cards-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+#cards-bar { height: 100%; width: 0; background: var(--primary); transition: width 0.25s; }
+.flashcard {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 28px 20px;
+  text-align: center;
+  background: var(--card);
+  border-radius: 20px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.flashcard.flipped { box-shadow: 0 6px 24px rgba(79, 70, 229, 0.18); }
+.fc-front { display: flex; align-items: center; gap: 14px; }
+.fc-word { font-size: 2.6rem; font-weight: 800; word-break: break-word; }
+.fc-meaning { font-size: 1.6rem; font-weight: 700; color: var(--primary); margin: 0; }
+.fc-memo { color: var(--muted); margin: 6px 0 0; white-space: pre-line; }
+.fc-hint { color: var(--muted); margin: 0; }
+.cards-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+.cards-actions .btn { min-height: 64px; }
+body.cards-open { overflow: hidden; }
+
+/* ===================== 통계 ===================== */
+.stats-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat-tile { display: flex; flex-direction: column; padding: 14px 16px; background: var(--card); border-radius: var(--radius); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06); }
+.stat-tile span { font-size: 0.85rem; color: var(--muted); }
+.stat-tile b { font-size: 1.4rem; }
+.stats-chart { width: 100%; height: auto; }
+.chart-axis { stroke: var(--border); stroke-width: 1.5; }
+.chart-goal { stroke: var(--ok); stroke-dasharray: 5 5; }
+.chart-bar { fill: var(--primary); opacity: 0.85; }
+.chart-line { fill: none; stroke: #f59e0b; stroke-width: 2.5; }
+.chart-dot { fill: #f59e0b; stroke: var(--card); stroke-width: 2; }
+.chart-label { font-size: 12px; fill: var(--muted); }
+.chart-label.goal { fill: var(--ok); }
+.chart-label.pct { fill: #d97706; }
+.stats-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.stats-grid .card { margin-bottom: 0; }
+@media (min-width: 900px) and (orientation: landscape) {
+  .stats-grid { grid-template-columns: 3fr 2fr; }
+}
+.top-list { list-style: none; margin: 0; padding: 0; }
+.top-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.top-item:last-child { border-bottom: none; }
+.top-rank { width: 24px; text-align: center; font-weight: 800; color: var(--primary); }
+.top-main { flex: 1; min-width: 0; }
+.top-main span { color: var(--muted); }
+.top-meta { font-size: 0.85rem; color: var(--bad); white-space: nowrap; }
+.stats-mastery { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 20px; }
+.donut { width: 180px; height: 180px; }
+.donut-bg { stroke: var(--border); }
+.donut-known { stroke: var(--ok); }
+.donut-learning { stroke: #f59e0b; }
+.donut-new { stroke: #c7cad6; }
+.donut-num { font-size: 28px; font-weight: 800; fill: var(--text); }
+.donut-sub { font-size: 13px; fill: var(--muted); }
+.donut-legend { list-style: none; margin: 0; padding: 0; }
+.donut-legend li { margin: 6px 0; }
+.donut-legend .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; }
+.donut-legend .dot.mb-new { background: #c7cad6; }
+
+/* 탭 5개: 좁은 화면에서도 한 줄 */
+@media (max-width: 600px) {
+  .tab { font-size: 0.9rem; padding: 0 2px; }
+}

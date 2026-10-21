@@ -1,11 +1,13 @@
 /* ============================================================
  * review.js — 숙련도와 자동 목록
  *  - 숙련도: new(출제 0회) / learning / known(최근 3번 모두 정답 또는 직접 '외움' 표시)
- *  - 자동 목록: 최근 틀린 단어, 정답률 60% 미만, 아직 안 푼 단어, 이번 주 추가, 외운 단어
+ *  - 자동 목록: 오늘 복습, 최근 틀린 단어, 정답률 60% 미만, 아직 안 푼 단어, 이번 주 추가, 외운 단어
  *    (항상 지금 데이터로 계산 — 따로 저장하지 않음)
+ *  - 복습 간격: 맞히면 1→3→7→14→30일, 틀리면 1일 / 연속 학습일, 하루 목표
  * ============================================================ */
 
 const MASTERY_LABEL = { new: '새 단어', learning: '학습 중', known: '외움' };
+const DAY = 24 * 60 * 60 * 1000;
 
 /** 단어의 숙련도 */
 function masteryOf(w) {
@@ -50,14 +52,70 @@ function setMarkedKnown(ids, value) {
   saveWords();
 }
 
-/** 복습이 필요한 단어인지 (학습 중인 단어) */
+/* ---------- 복습 간격 ---------- */
+
+const REVIEW_STEPS = [1, 3, 7, 14, 30]; // 일
+
+/** 그날 0시 */
+function startOfDay(ts = Date.now()) {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** 시험 결과로 다음 복습일 정하기: 맞히면 간격을 한 단계 늘리고, 틀리면 1일 */
+function scheduleReview(w, correct, now = Date.now()) {
+  if (correct) {
+    w.interval = REVIEW_STEPS.find(s => s > (w.interval || 0)) || REVIEW_STEPS[REVIEW_STEPS.length - 1];
+  } else {
+    w.interval = 1;
+  }
+  const d = new Date(startOfDay(now));
+  d.setDate(d.getDate() + w.interval);
+  w.nextReview = d.getTime();
+}
+
+/** 오늘(또는 그 전에) 복습할 차례인 단어인지 */
+function isDue(w) {
+  return !!w.nextReview && w.nextReview < startOfDay() + DAY;
+}
+
+/** 복습이 필요한 단어인지 (오늘 복습할 차례) */
 function needsReview(w) {
-  return masteryOf(w) === 'learning';
+  return isDue(w);
+}
+
+/* ---------- 날짜별 학습량 (연속 학습일, 하루 목표, 통계) ---------- */
+
+/** 푼 문제 수와 정답 수를 오늘 날짜에 더함 (400일 지난 기록은 정리) */
+function recordDaily(n, ok, ts = Date.now()) {
+  if (!n) return;
+  const k = dayKey(ts);
+  const d = state.daily[k] || { n: 0, ok: 0 };
+  d.n += n;
+  d.ok += ok;
+  state.daily[k] = d;
+  const oldest = dayKey(ts - 400 * DAY);
+  Object.keys(state.daily).forEach(key => { if (key < oldest) delete state.daily[key]; });
+  saveDaily();
+}
+
+function todaySolved() {
+  return (state.daily[dayKey()] || {}).n || 0;
+}
+
+/** 연속 학습일: 오늘(오늘 아직 안 했으면 어제)부터 거꾸로 하루도 빠짐없이 공부한 날 수 */
+function streakDays() {
+  const d = new Date();
+  if (!state.daily[dayKey(d.getTime())]) d.setDate(d.getDate() - 1);
+  let count = 0;
+  while ((state.daily[dayKey(d.getTime())] || {}).n > 0) {
+    count++;
+    d.setDate(d.getDate() - 1);
+  }
+  return count;
 }
 
 /* ---------- 자동 목록 ---------- */
-
-const DAY = 24 * 60 * 60 * 1000;
 
 /** 이번 주 월요일 0시 */
 function startOfWeek(now = new Date()) {
@@ -67,6 +125,9 @@ function startOfWeek(now = new Date()) {
 }
 
 const AUTO_LISTS = [
+  { id: 'auto:due', name: '오늘 복습', desc: '복습 간격(1·3·7·14·30일)에 따라 오늘 다시 볼 단어', color: 5, icon: '↻',
+    filter: w => isDue(w),
+    sort: (a, b) => a.nextReview - b.nextReview },
   { id: 'auto:wrong', name: '최근 틀린 단어', desc: '최근 2주 안에 시험에서 틀린 단어', color: 7, icon: '✗',
     filter: w => w.lastWrongAt && Date.now() - w.lastWrongAt < 14 * DAY,
     sort: (a, b) => b.lastWrongAt - a.lastWrongAt },

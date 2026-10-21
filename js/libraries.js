@@ -254,6 +254,7 @@ function openLibrary(libId) {
   $('#list-search').value = '';
   renderLibraryHero();
   renderList();
+  renderRecommendations(true);
   window.scrollTo(0, 0);
 }
 
@@ -277,6 +278,7 @@ function renderLibraryHero() {
   $('#lib-delete-btn').hidden = !lib;
   $('#lib-add-words-btn').hidden = !!auto;
   $('#lib-test-btn').disabled = words.length === 0;
+  $('#lib-cards-btn').disabled = words.length === 0;
 }
 
 /** 새 라이브러리 / 편집 대화상자. 만든(수정한) 라이브러리 반환 */
@@ -359,16 +361,22 @@ async function openPackPreview(packId) {
     <div class="pack-preview-head">${coverHtml(pack)}<div>
       <p class="hint">${escapeHtml(pack.desc)}<br>단어 ${items.length}개</p></div></div>
     <ul class="pack-preview">${preview}<li class="hint">… 외 ${Math.max(0, items.length - 12)}개</li></ul>
-    <p class="hint">이미 등록된 단어는 뜻을 바꾸지 않고 라이브러리에만 연결합니다.</p>`;
+    <p class="hint">이미 등록된 단어는 뜻을 바꾸지 않고 라이브러리에만 연결합니다.
+      <b>골라 담기</b>는 카드를 한 장씩 보며 모르는 단어만 새 라이브러리로 만들어요.</p>`;
 
   const choice = await showDialog({
     title: pack.name,
     html,
-    buttons: installed
-      ? [{ label: '닫기', value: null }, { label: '라이브러리 열기', value: 'open', primary: true }]
-      : [{ label: '닫기', value: null }, { label: '내 라이브러리에 추가', value: 'install', primary: true }]
+    buttons: [
+      { label: '닫기', value: null },
+      { label: '골라 담기 (카드)', value: 'pick' },
+      installed
+        ? { label: '라이브러리 열기', value: 'open', primary: true }
+        : { label: '통째로 추가', value: 'install', primary: true }
+    ]
   });
   if (choice === 'open') openLibrary(installed.id);
+  if (choice === 'pick') startPackPicking(pack);
   if (choice === 'install') {
     const { lib, created, linked } = installPack(pack);
     showToast(`새 단어 ${created}개 추가${linked ? `, 기존 단어 ${linked}개 연결` : ''}`, 3000);
@@ -456,7 +464,7 @@ function isInDefaultLibrary(wordId) {
 function onEnterLibraryView() {
   if ($('#lib-detail').hidden) renderLibraryHome();
   else if (!libraryExists(currentLibId)) showLibraryHome();
-  else { renderLibraryHero(); renderList(); }
+  else { renderLibraryHero(); renderList(); renderRecommendations(); }
 }
 
 function initLibraryView() {
@@ -481,6 +489,7 @@ function initLibraryView() {
   // ▶ 테스트: 이 라이브러리의 마지막 시험 설정으로 바로 시작
   $('#lib-test-btn').addEventListener('click', () => startScopeTest([currentLibId]));
   $('#lib-history-btn').addEventListener('click', () => openHistoryDialog(currentLibId));
+  $('#lib-cards-btn').addEventListener('click', () => startFlashcards(currentLibId));
   $('#lib-add-words-btn').addEventListener('click', () => {
     state.settings.addLibrary = currentLibId === 'all' ? '' : currentLibId;
     saveSettings();

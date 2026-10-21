@@ -516,7 +516,7 @@ async function quitTest() {
   else if (quiz.phase === 'answer' && currentQuestion().type === 'input') $('#quiz-answer').focus();
 }
 
-/** 결과를 단어별 통계에 반영 (출제·오답 횟수, 최근 결과) */
+/** 결과를 단어별 통계에 반영 (출제·오답 횟수, 최근 결과, 다음 복습일, 날짜별 학습량) */
 function commitResults(answers) {
   const now = Date.now();
   answers.forEach(a => {
@@ -526,8 +526,10 @@ function commitResults(answers) {
     if (!a.correct) w.wrong++;
     w.lastTested = now;
     recordWordResult(w, a.correct, now);
+    scheduleReview(w, a.correct, now);
   });
   saveWords();
+  recordDaily(answers.length, answers.filter(a => a.correct).length, now);
 }
 
 /** 테스트 종료 → 통계 반영 + 기록 저장 + 결과 화면 */
@@ -612,7 +614,7 @@ function renderScopeList() {
     const words = libraryWords(id);
     if (isAutoList(id) && !words.length && !scope.includes(id)) return ''; // 빈 자동 목록은 숨김
     const last = lastHistory(id);
-    const review = words.filter(needsReview).length;
+    const review = words.filter(w => needsReview(w)).length;
     const checked = scope.includes(id);
     return `
       <li class="scope-row${checked ? ' checked' : ''}${isAutoList(id) ? ' auto' : ''}">
@@ -645,6 +647,7 @@ function renderTestSetup() {
     seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.value === String(state.settings[key])));
   });
   renderScopeList();
+  renderTodayCard();
 
   const scope = currentScope();
   const total = scopeWords(scope).length;
@@ -677,6 +680,7 @@ async function handleStartClick() {
 
 /** 테스트 탭에 들어올 때: 진행 중이 아니면 설정 화면 갱신 */
 function onEnterTestView() {
+  renderTodayCard();
   const inProgress = quiz && (quiz.phase === 'answer' || quiz.phase === 'feedback');
   if (inProgress) {
     if (quiz.phase === 'answer' && currentQuestion().type === 'input') $('#quiz-answer').focus();
