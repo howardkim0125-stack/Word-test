@@ -149,12 +149,14 @@ function dictSuggest(input, limit = 5) {
     .slice(0, limit)
     .forEach(w => push({ word: w.word, pos: dictGet(w.word)?.pos || '', meanings: w.meanings }));
 
-  // 사전에서 접두사가 맞는 단어
+  // 사전에서 접두사가 맞는 단어 (짧은 단어가 기본 단어인 경우가 많아 짧은 것부터)
   const { keys, map } = getDictIndex();
-  for (let i = lowerBound(keys, key); i < keys.length && out.length < limit; i++) {
+  const matches = [];
+  for (let i = lowerBound(keys, key); i < keys.length && matches.length < 40; i++) {
     if (!keys[i].startsWith(key)) break;
-    push(map.get(keys[i]));
+    matches.push(keys[i]);
   }
+  matches.sort((a, b) => a.length - b.length || (a < b ? -1 : 1)).forEach(k => push(map.get(k)));
   return out;
 }
 
