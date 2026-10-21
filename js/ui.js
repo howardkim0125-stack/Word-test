@@ -42,6 +42,7 @@ function showDialog({ title = '', message = '', html = null, buttons = [{ label:
     const actions = $('#modal-actions');
     $('#modal-title').textContent = title;
     if (html !== null) body.innerHTML = html; else body.textContent = message;
+    body.classList.toggle('is-html', html !== null); // HTML 본문은 줄바꿈을 그대로 보이지 않게
     actions.innerHTML = '';
 
     const close = (value) => {

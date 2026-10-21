@@ -23,7 +23,7 @@
     <h1 class="app-title">영단어 단어장</h1>
     <nav class="tabs" role="tablist">
       <button class="tab" data-tab="add" role="tab">단어 등록</button>
-      <button class="tab" data-tab="list" role="tab">단어 목록</button>
+      <button class="tab" data-tab="list" role="tab">라이브러리</button>
       <button class="tab" data-tab="test" role="tab">테스트</button>
       <button class="tab" data-tab="settings" role="tab">설정</button>
     </nav>
@@ -41,6 +41,12 @@
   <main class="app-main">
     <!-- ===================== 단어 등록 ===================== -->
     <section class="view" id="view-add" hidden>
+      <div class="card add-target">
+        <label class="field">
+          <span>저장할 라이브러리</span>
+          <select id="add-library"></select>
+        </label>
+      </div>
       <div class="card">
         <h2>단어 하나 등록</h2>
         <form id="add-form" autocomplete="off">
@@ -71,21 +77,55 @@
       </div>
     </section>
 
-    <!-- ===================== 단어 목록 ===================== -->
+    <!-- ===================== 라이브러리 ===================== -->
     <section class="view" id="view-list" hidden>
-      <div class="list-toolbar">
-        <input type="search" id="list-search" placeholder="단어, 뜻, 메모 검색"
-               autocapitalize="off" autocorrect="off" spellcheck="false">
-        <select id="list-sort" aria-label="정렬">
-          <option value="recent">최근 등록순</option>
-          <option value="alpha">알파벳순</option>
-          <option value="accuracy">정답률 낮은순</option>
-          <option value="wrong">오답 많은순</option>
-        </select>
+      <!-- 1) 라이브러리 홈: 내 라이브러리 + 추천 단어팩 -->
+      <div id="lib-home">
+        <div class="section-head">
+          <h2>내 라이브러리</h2>
+          <button class="btn btn-small btn-primary" id="new-lib-btn">＋ 새 라이브러리</button>
+        </div>
+        <div class="lib-grid" id="lib-grid"></div>
+
+        <div class="section-head">
+          <h2>수능·모의고사 빈출 단어팩</h2>
+        </div>
+        <p class="hint">수능·학력평가 영어 지문에 자주 나오는 어휘를 묶었어요. 누르면 미리 보고 내 라이브러리에 추가할 수 있어요.</p>
+        <div class="lib-grid" id="pack-grid"></div>
       </div>
-      <p class="list-count" id="list-count"></p>
-      <ul class="word-list" id="word-list"></ul>
-      <p class="empty" id="list-empty" hidden>등록된 단어가 없습니다. ‘단어 등록’ 탭에서 단어를 추가하세요.</p>
+
+      <!-- 2) 라이브러리 상세: 단어 목록 -->
+      <div id="lib-detail" hidden>
+        <button class="btn btn-small back-btn" id="lib-back-btn">‹ 라이브러리</button>
+        <div class="lib-hero">
+          <div class="lib-cover lib-cover-large" id="lib-hero-cover"></div>
+          <div class="lib-hero-info">
+            <p class="lib-kind" id="lib-hero-kind"></p>
+            <h2 class="lib-hero-name" id="lib-hero-name"></h2>
+            <p class="hint" id="lib-hero-desc"></p>
+            <div class="btn-row lib-hero-actions">
+              <button class="btn btn-primary" id="lib-test-btn">▶ 테스트</button>
+              <button class="btn" id="lib-add-words-btn">＋ 단어 추가</button>
+              <button class="btn" id="lib-edit-btn">편집</button>
+              <button class="btn btn-danger" id="lib-delete-btn">삭제</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-toolbar">
+          <input type="search" id="list-search" placeholder="단어, 뜻, 메모 검색"
+                 autocapitalize="off" autocorrect="off" spellcheck="false">
+          <select id="list-sort" aria-label="정렬">
+            <option value="recent">최근 등록순</option>
+            <option value="alpha">알파벳순</option>
+            <option value="accuracy">정답률 낮은순</option>
+            <option value="wrong">오답 많은순</option>
+          </select>
+        </div>
+        <p class="list-count" id="list-count"></p>
+        <ul class="word-list" id="word-list"></ul>
+        <p class="empty" id="list-empty" hidden></p>
+      </div>
     </section>
 
     <!-- ===================== 테스트 ===================== -->
@@ -93,6 +133,11 @@
       <!-- 1) 테스트 설정 화면 -->
       <div id="test-setup" class="card">
         <h2>테스트 설정</h2>
+
+        <div class="option-group">
+          <span class="option-label">출제 범위</span>
+          <select id="test-library" aria-label="출제 범위"></select>
+        </div>
 
         <div class="option-group">
           <span class="option-label">출제 방향</span>
@@ -241,7 +286,9 @@
   <script src="js/ui.js"></script>
   <script src="js/speech.js"></script>
   <script src="js/samples.js"></script>
+  <script src="js/packs.js"></script>
   <script src="js/words.js"></script>
+  <script src="js/libraries.js"></script>
   <script src="js/list.js"></script>
   <script src="js/quiz.js"></script>
   <script src="js/backup.js"></script>

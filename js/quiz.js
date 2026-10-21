@@ -133,17 +133,18 @@ function gradeInput(q, userAnswer) {
 
 /** 테스트 시작. targetWords를 주면 그 단어들만 출제 (틀린 것만 다시 풀기) */
 function startTest(targetWords = null) {
-  if (state.words.length === 0) {
-    showToast('저장된 단어가 없습니다. 먼저 단어를 등록하세요.');
+  const s = state.settings;
+  const pool = libraryWords(s.testLibrary); // 출제 범위(라이브러리)의 단어
+  if (!targetWords && pool.length === 0) {
+    showToast('출제할 단어가 없습니다. 먼저 단어를 등록하세요.');
     return;
   }
-  const s = state.settings;
   let picked;
   if (targetWords) {
     picked = shuffle(targetWords);
   } else {
-    const n = Math.min(s.count, state.words.length);
-    picked = s.mode === 'weighted' ? pickWeighted(state.words, n) : pickRandom(state.words, n);
+    const n = Math.min(s.count, pool.length);
+    picked = s.mode === 'weighted' ? pickWeighted(pool, n) : pickRandom(pool, n);
   }
 
   quiz = {
@@ -378,12 +379,19 @@ function renderTestSetup() {
     const key = seg.dataset.setting;
     seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.value === state.settings[key]));
   });
-  const total = state.words.length;
+  // 삭제된 라이브러리가 선택돼 있으면 '모든 단어'로
+  if (state.settings.testLibrary !== 'all' && !getLibrary(state.settings.testLibrary)) {
+    state.settings.testLibrary = 'all';
+    saveSettings();
+  }
+  fillLibrarySelect($('#test-library'), { selected: state.settings.testLibrary, includeAll: true });
+
+  const total = libraryWords(state.settings.testLibrary).length;
   const n = Math.min(state.settings.count, total);
   let info = total === 0
-    ? '저장된 단어가 없습니다. 먼저 단어를 등록하세요.'
-    : `저장된 단어 ${total}개 중 ${n}문제 출제 (출제 개수는 ‘설정’ 탭에서 변경)`;
-  if (state.settings.format === 'choice' && total > 0 && total < 4) info += '\n※ 단어가 4개 미만이면 객관식 보기 수가 줄어듭니다.';
+    ? '출제할 단어가 없습니다. 단어를 등록하거나 다른 범위를 고르세요.'
+    : `${libraryName(state.settings.testLibrary)} ${total}개 중 ${n}문제 출제 (출제 개수는 ‘설정’ 탭에서 변경)`;
+  if (state.settings.format === 'choice' && total > 0 && state.words.length < 4) info += '\n※ 단어가 4개 미만이면 객관식 보기 수가 줄어듭니다.';
   $('#test-count-info').textContent = info;
   $('#start-test-btn').disabled = total === 0;
 }
@@ -410,6 +418,11 @@ function initTestView() {
     });
   });
 
+  $('#test-library').addEventListener('change', e => {
+    state.settings.testLibrary = e.target.value;
+    saveSettings();
+    renderTestSetup();
+  });
   $('#start-test-btn').addEventListener('click', () => startTest());
   $('#quiz-input-form').addEventListener('submit', handleInputSubmit);
   $('#quiz-choices').addEventListener('click', e => {

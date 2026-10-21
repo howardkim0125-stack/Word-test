@@ -2,7 +2,7 @@
  * app.js — 앱 시작, 탭 전환, 설정 화면, 서비스 워커 등록
  * ============================================================ */
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const TAB_KEY = 'wt.tab';
 
 /* ---------- 탭 전환 ---------- */
@@ -17,7 +17,8 @@ function switchTab(name) {
   try { sessionStorage.setItem(TAB_KEY, name); } catch (e) { /* 무시 */ }
 
   // 탭에 들어올 때 최신 데이터로 다시 그리기
-  if (name === 'list') renderList();
+  if (name === 'list') onEnterLibraryView();
+  else if (name === 'add') renderAddLibrarySelect();
   else if (name === 'test') onEnterTestView();
   else if (name === 'settings') renderSettings();
   window.scrollTo(0, 0);
@@ -25,7 +26,9 @@ function switchTab(name) {
 
 /** 데이터가 크게 바뀌었을 때(가져오기 등) 전체 화면 갱신 */
 function refreshAllViews() {
-  renderList();
+  if (currentLibId !== 'all' && !getLibrary(currentLibId)) showLibraryHome();
+  onEnterLibraryView();
+  renderAddLibrarySelect();
   renderSettings();
   renderTestSetup();
   updateBackupBanner();
@@ -63,6 +66,8 @@ async function deleteAllWords() {
   if (!ok2) return;
   state.words = [];
   saveWords();
+  state.libraries.forEach(l => { l.wordIds = []; }); // 라이브러리는 남기고 비움
+  saveLibraries();
   refreshAllViews();
   showToast('모든 단어를 삭제했습니다.');
 }
@@ -105,6 +110,7 @@ function init() {
   initSpeech();
 
   initAddView();
+  initLibraryView();
   initListView();
   initTestView();
   initSettingsView();
