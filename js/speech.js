@@ -34,3 +34,9 @@ function speak(text) {
   u.rate = 0.9;
   speechSynthesis.speak(u);
 }
+
+/** 설정에서 '자동 발음'을 켰을 때만 읽어 주기 (지원하지 않으면 조용히 넘어감) */
+function autoSpeak(text) {
+  if (!state.settings.autoSpeak || !text || !('speechSynthesis' in window)) return;
+  speak(text);
+}

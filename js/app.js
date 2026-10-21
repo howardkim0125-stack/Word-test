@@ -2,10 +2,21 @@
  * app.js — 앱 시작, 탭 전환, 설정 화면, 서비스 워커 등록, 앱 설치 안내
  * ============================================================ */
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '3.0.0';
 const TAB_KEY = 'wt.tab';
 
 /* ---------- 탭 전환 ---------- */
+
+/**
+ * 탭 누르기: 다른 탭이면 전환, 지금 탭을 한 번 더 누르면 맨 위로
+ * (라이브러리 탭은 맨 위에서 한 번 더 누르면 라이브러리 홈으로)
+ */
+function onTabClick(name) {
+  const active = $(`.tab[data-tab="${name}"]`)?.classList.contains('active');
+  if (!active) { switchTab(name); return; }
+  if (window.scrollY > 4) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  if (name === 'list' && !$('#lib-detail').hidden) showLibraryHome();
+}
 
 function switchTab(name) {
   $$('.tab').forEach(t => {
@@ -40,6 +51,8 @@ function refreshAllViews() {
 
 function renderSettings() {
   renderDefaultLibrarySelect();
+  $('#setting-user-level').value = String(state.settings.userLevel);
+  $('#setting-auto-speak').checked = state.settings.autoSpeak;
   $('#setting-daily-goal').value = String(state.settings.dailyGoal);
   if ($('#setting-daily-goal').value !== String(state.settings.dailyGoal)) {
     $('#setting-daily-goal').add(new Option(`${state.settings.dailyGoal}문제`, state.settings.dailyGoal));
@@ -93,6 +106,11 @@ function initSettingsView() {
     state.settings.dailyGoal = Number(e.target.value) || DEFAULT_SETTINGS.dailyGoal;
     saveSettings();
     showToast(`하루 목표: ${state.settings.dailyGoal}문제`);
+  });
+  $('#setting-auto-speak').addEventListener('change', e => {
+    state.settings.autoSpeak = e.target.checked;
+    saveSettings();
+    showToast(e.target.checked ? '자동 발음을 켰어요' : '자동 발음을 껐어요');
   });
   $('#add-samples-btn').addEventListener('click', () => { addSampleWords(); renderSettings(); });
   $('#remove-samples-btn').addEventListener('click', async () => { await removeSampleWords(); renderSettings(); });
@@ -272,10 +290,11 @@ function init() {
   initCards();
   initRecommendations();
   initStats();
+  initLevels();
   initInstall();
   initTypingMode();
 
-  $$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+  $$('.tab').forEach(t => t.addEventListener('click', () => onTabClick(t.dataset.tab)));
   $('#update-apply-btn').addEventListener('click', applyUpdate);
 
   // 시작 탭: 홈 화면 바로가기(?tab=test 등) → 지난번 탭 → 단어가 있으면 테스트
@@ -292,6 +311,8 @@ function init() {
   });
 
   registerServiceWorker();
+  // 사전 색인은 처음 쓸 때 만들어지므로 한가할 때 미리 만들어 둠 (첫 자동완성이 늦지 않게)
+  (window.requestIdleCallback || (f => setTimeout(f, 600)))(() => getDictIndex());
 }
 
 document.addEventListener('DOMContentLoaded', init);

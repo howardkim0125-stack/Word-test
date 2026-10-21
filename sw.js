@@ -3,7 +3,7 @@
  *  - 파일을 수정해서 다시 배포할 때는 CACHE_VERSION 숫자를 올려 주세요.
  * ============================================================ */
 
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `wordbook-${CACHE_VERSION}`;
 
 // 오프라인에서 필요한 모든 파일 (상대 경로라 GitHub Pages 하위 폴더에서도 동작)
@@ -19,6 +19,8 @@ const APP_FILES = [
   './js/packs.js',
   './js/dict-data.js',
   './js/dict.js',
+  './js/korean.js',
+  './js/levels.js',
   './js/libraries.js',
   './js/words.js',
   './js/review.js',

@@ -105,6 +105,8 @@ function renderStats() {
     </li>`).join('') : '<li class="empty">아직 틀린 단어가 없어요.</li>';
   $('#stats-top-test').hidden = top.length === 0;
 
+  $('#stats-levels').innerHTML = levelStatsHtml();
+
   const c = masteryCounts(state.words);
   $('#stats-mastery').innerHTML = state.words.length ? `
     ${masteryDonutSvg(c)}

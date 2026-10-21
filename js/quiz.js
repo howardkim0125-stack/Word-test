@@ -62,14 +62,12 @@ function spellingSimilarity(a, b) {
   return Math.min(p, 4) * 2 + Math.min(s, 3) - editDistance(a, b);
 }
 
-/** 오답 보기 후보: 내 단어장의 다른 단어 (단어가 4개 미만이면 단어팩 단어도) */
+/** 오답 보기 후보: 내 단어장의 다른 단어 (단어가 4개 미만이면 사전에서 난이도가 같은 단어도) */
 function distractorPool(word) {
   const pool = state.words.filter(o => o.id !== word.id);
   if (state.words.length >= 4) return pool;
-  const extra = [];
-  WORD_PACKS.forEach(p => packWordList(p).forEach(it => {
-    if (!findWord(it.word)) extra.push({ id: `pack:${it.word}`, word: it.word, meanings: it.meanings });
-  }));
+  const extra = shuffle(levelEntries(dictLevel(word.word) || 5).filter(e => !findWord(e.word))).slice(0, 200)
+    .map(e => ({ id: `dict:${e.word}`, word: e.word, meanings: e.meanings }));
   return pool.concat(extra);
 }
 
@@ -142,64 +140,80 @@ function normalizeAnswer(text) {
   return String(text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-// 영→한 채점에서 떼고 비교하는 끝말 (긴 것부터) — "포기하다" = "포기" = "포기함"
-const KO_ENDINGS = ['적인', '하다', '되다', '함', '기', '한'];
-
-/** 뜻 정리: 소문자, 괄호 내용, "~을/를/에…" 같은 표시, 띄어쓰기 제거 */
-function cleanMeaning(text) {
-  return normalizeAnswer(text)
-    .replace(/\([^)]*\)|\[[^\]]*\]/g, '')
-    .replace(/~\s*(을|를|이|가|은|는|에게|에서|에|와|과|의|으로|로)?/g, '')
-    .replace(/[\s.·]/g, '');
+/** 영어 답 다듬기: 소문자, 띄어쓰기 하나로, 숙어의 물결표(~) 빼기 */
+function normalizeEnglish(text) {
+  return normalizeAnswer(String(text ?? '').replace(/[~…]/g, ' '));
 }
 
-/** 뜻 비교용 후보: 정리한 말 + 끝말을 뗀 말 */
-function meaningVariants(text) {
-  const base = cleanMeaning(text);
-  const out = [base];
-  for (const end of KO_ENDINGS) {
-    if (base.length > end.length && base.endsWith(end)) { out.push(base.slice(0, -end.length)); break; }
-  }
-  return out.filter(Boolean);
+/** 같은 단어의 변화형인지 (ran → run, gave up → give up). 숙어는 단어마다 비교 */
+function isInflectionOf(answer, target) {
+  const a = answer.split(' '), t = target.split(' ');
+  if (a.length !== t.length || answer === target) return false;
+  return a.every((w, i) => w === t[i] || lemmaCandidates(w).includes(t[i]));
+}
+
+/** 어근이 같아 보이는지 (decide ↔ decision, happy ↔ happiness) */
+function sharesEnglishRoot(a, b) {
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  return p >= 4 && p >= Math.min(a.length, b.length) * 0.6;
 }
 
 /**
- * 주관식 채점 → { correct, near, note }
- *  - 영→한: 쉼표로 여러 개 적었으면 하나라도 맞으면 정답
- *           띄어쓰기·괄호·"~을/를"·끝말(하다/되다/함/기/적인/한) 차이는 무시
- *           한 글자만 다르면 "거의 정답" (오답이지만 정답 인정 버튼 강조)
- *  - 한→영: 영단어와 같으면 정답 (대소문자·앞뒤 공백 무시)
- *           철자 1글자 차이는 "1글자 틀림", 내 단어장의 다른 단어면 "다른 단어예요"
+ * 한→영 채점 → { correct, near, note }
+ *  - 영단어와 같으면 정답 (대소문자·띄어쓰기·물결표 무시)
+ *  - 같은 단어의 변화형(ran, studies)은 품사가 같으므로 정답 + "run의 변화형" 안내
+ *  - 어근이 같지만 품사가 다른 단어(decision ↔ decide)는 오답 + "품사가 달라요"
+ *  - 내 단어장·사전의 다른 단어면 안내, 철자 1글자 차이는 "1글자 틀림"
+ */
+function gradeEnglishAnswer(q, userAnswer) {
+  const answer = normalizeEnglish(userAnswer);
+  if (!answer) return { correct: false };
+  const target = normalizeEnglish(q.word);
+  if (answer === target) return { correct: true };
+  if (isInflectionOf(answer, target)) return { correct: true, note: `${q.word}의 변화형이에요` };
+
+  const userEntry = dictLookup(answer)?.entry || null;
+  const targetEntry = dictGet(q.word);
+  if (userEntry && targetEntry && wordKey(userEntry.word) !== target && sharesEnglishRoot(answer, target)) {
+    const tp = new Set(targetEntry.senses.map(s => s.pos));
+    if (!userEntry.senses.some(s => tp.has(s.pos))) {
+      return {
+        correct: false, posMismatch: true,
+        note: `품사가 달라요 — ${userEntry.word}은(는) ${POS_NAME[userEntry.pos] || '다른 품사'}, 정답은 ${POS_NAME[targetEntry.pos] || '다른 품사'}예요`
+      };
+    }
+  }
+  const other = findWord(answer);
+  if (other && other.id !== q.wordId) {
+    const same = meaningsOverlap(other, { meanings: q.meanings });
+    return { correct: false, note: `${same ? '뜻이 같은 ' : ''}다른 단어예요 (뜻: ${other.meanings.join(', ')})` };
+  }
+  if (userEntry && wordKey(userEntry.word) !== target) {
+    const keys = new Set(q.meanings.flatMap(m => koForms(m)));
+    if (allMeanings(userEntry).some(m => koForms(m).some(k => keys.has(k)))) {
+      return { correct: false, note: `뜻이 비슷한 다른 단어예요 (${userEntry.word}: ${userEntry.meanings.slice(0, 3).join(', ')})` };
+    }
+  }
+  if (editDistance(answer, target) === 1) return { correct: false, near: true, note: '1글자 틀림' };
+  return { correct: false };
+}
+
+/**
+ * 주관식 채점 → { correct, near, note, posMismatch }
+ *  - 영→한: 품사가 같은 꼴만 정답 (korean.js gradeKoreanAnswer)
+ *  - 한→영: gradeEnglishAnswer
  */
 function gradeInput(q, userAnswer) {
-  const answer = normalizeAnswer(userAnswer);
-  if (!answer) return { correct: false };
-
-  if (q.dir === 'ko2en') {
-    const target = normalizeAnswer(q.word);
-    if (answer === target) return { correct: true };
-    const other = findWord(answer);
-    if (other && other.id !== q.wordId) {
-      const same = meaningsOverlap(other, { meanings: q.meanings });
-      return { correct: false, note: `${same ? '뜻이 같은 ' : ''}다른 단어예요 (뜻: ${other.meanings.join(', ')})` };
-    }
-    if (editDistance(answer, target) === 1) return { correct: false, near: true, note: '1글자 틀림' };
-    return { correct: false };
-  }
-
-  const correctList = [...new Set(q.meanings.flatMap(meaningVariants))];
-  const correctSet = new Set(correctList);
-  const userVariants = splitMeanings(answer).flatMap(meaningVariants);
-  if (userVariants.some(v => correctSet.has(v))) return { correct: true };
-  const near = userVariants.some(v => correctList.some(c => c.length >= 2 && editDistance(v, c) === 1));
-  return near ? { correct: false, near: true, note: '한 글자만 달라요' } : { correct: false };
+  if (!normalizeAnswer(userAnswer)) return { correct: false };
+  return q.dir === 'ko2en' ? gradeEnglishAnswer(q, userAnswer) : gradeKoreanAnswer(q.word, q.meanings, userAnswer);
 }
 
 /* ---------- 진행 중인 시험 저장 (이어서 풀기) ---------- */
 
 /** 지금 시험을 wt.quizRun에 저장 (answers[i]는 questions[i]의 답이라 question은 빼고 저장) */
 function saveQuizRun() {
-  if (!quiz || quiz.phase === 'done') return;
+  if (!quiz || quiz.phase === 'done' || quiz.diagnostic) return;
   writeJSON(STORAGE_KEYS.quizRun, {
     questions: quiz.questions,
     index: quiz.index,
@@ -368,11 +382,18 @@ function renderQuestion() {
 
   $('#quiz-progress').textContent = `${quiz.index + 1} / ${total}`;
   $('#quiz-progress-bar').style.width = `${(quiz.index / total) * 100}%`;
-  $('#quiz-direction').textContent = DIRECTION_LABEL[q.dir] + (q.type === 'choice' ? ' · 객관식' : ' · 주관식');
-  $('#quiz-prompt').textContent = q.prompt;
+  $('#quiz-direction').textContent = (quiz.diagnostic ? '수준 진단 · ' : '') + DIRECTION_LABEL[q.dir] + (q.type === 'choice' ? ' · 객관식' : ' · 주관식');
+  // 한→영은 뜻을 품사별로 묶어 보여 주고, 영→한 주관식은 어떤 품사로 답할지 알려 줌
+  if (q.dir === 'ko2en') $('#quiz-prompt').innerHTML = meaningGroupsHtml(q.word, q.meanings);
+  else $('#quiz-prompt').textContent = q.prompt;
+  const posHint = q.dir === 'en2ko' && q.type === 'input' ? posHintText(q.word, q.meanings) : '';
+  $('#quiz-pos').textContent = posHint;
+  $('#quiz-pos').hidden = !posHint;
   // 영→한일 때만 처음부터 발음 버튼 표시 (한→영은 정답이 들리므로 채점 후에 표시)
   $('#quiz-speak-btn').hidden = q.dir !== 'en2ko';
   $('#quiz-feedback').hidden = true;
+  $('#quiz-dunno-btn').hidden = false;
+  if (q.dir === 'en2ko') autoSpeak(q.word);
 
   const form = $('#quiz-input-form');
   const input = $('#quiz-answer');
@@ -416,6 +437,12 @@ function handleInputSubmit(e) {
   recordAnswer(q, userAnswer, gradeInput(q, userAnswer));
 }
 
+/** 모르겠어요: 답을 보지 않고 오답으로 기록 */
+function handleDunno() {
+  if (!quiz || quiz.phase !== 'answer') return;
+  recordAnswer(currentQuestion(), '', { correct: false, dunno: true });
+}
+
 /** 객관식 보기 선택 */
 function handleChoice(index) {
   if (!quiz || quiz.phase !== 'answer') return;
@@ -426,7 +453,7 @@ function handleChoice(index) {
 
 /** 답 기록 후 채점 결과 보여주기 */
 function recordAnswer(q, userAnswer, result, choiceIndex = -1) {
-  quiz.answers.push({ question: q, userAnswer, correct: !!result.correct, near: !!result.near, note: result.note || '', accepted: false, choiceIndex });
+  quiz.answers.push({ question: q, userAnswer, correct: !!result.correct, near: !!result.near, note: result.note || '', accepted: false, choiceIndex, dunno: !!result.dunno });
   quiz.phase = 'feedback';
   quiz.gradedAt = Date.now();
   saveQuizRun();
@@ -436,23 +463,27 @@ function recordAnswer(q, userAnswer, result, choiceIndex = -1) {
 /** 채점 직후 정답 표시 (거의 정답이면 "정답 인정" 버튼 강조) */
 function showFeedback(q, ans) {
   const title = $('#quiz-feedback-title');
-  title.textContent = ans.correct ? (ans.accepted ? '⭕ 정답 인정' : '⭕ 정답!') : (ans.near ? '🟡 거의 정답' : '❌ 오답');
+  title.textContent = ans.correct ? (ans.accepted ? '⭕ 정답 인정' : '⭕ 정답!') : ans.dunno ? '🤔 모르겠어요' : (ans.near ? '🟡 거의 정답' : '❌ 오답');
   title.className = 'feedback-title ' + (ans.correct ? 'ok' : ans.near ? 'near' : 'bad');
-  $('#quiz-feedback-note').textContent = ans.correct ? '' : ans.note;
-  $('#quiz-feedback-note').hidden = ans.correct || !ans.note;
-  $('#quiz-feedback-answer').textContent = q.dir === 'en2ko'
-    ? `정답: ${q.meanings.join(', ')}`
-    : `정답: ${q.word}  (${q.meanings.join(', ')})`;
+  // 정답이어도 "원형은 run이에요"·"사전에 있는 다른 뜻" 같은 안내는 보여 줌 (정답 인정은 제외)
+  const note = ans.accepted ? '' : ans.note;
+  $('#quiz-feedback-note').textContent = note;
+  $('#quiz-feedback-note').hidden = !note;
+  $('#quiz-feedback-answer').innerHTML = q.dir === 'en2ko'
+    ? `정답: ${meaningGroupsHtml(q.word, q.meanings)}`
+    : `정답: <b>${escapeHtml(q.word)}</b> <span class="feedback-means">${meaningGroupsHtml(q.word, q.meanings)}</span>`;
   $('#quiz-feedback-memo').textContent = q.memo || '';
   $('#quiz-feedback-memo').hidden = !q.memo;
   // 주관식 오답일 때만 "정답 인정" 버튼 표시, 거의 정답이면 강조
   const accept = $('#quiz-accept-btn');
-  accept.hidden = ans.correct || q.type !== 'input';
+  accept.hidden = ans.correct || ans.dunno || q.type !== 'input';
   accept.classList.toggle('btn-primary', !!ans.near && !ans.correct);
   $('#quiz-next-btn').classList.toggle('btn-primary', !(ans.near && !ans.correct));
   $('#quiz-next-btn').textContent = quiz.index + 1 >= quiz.questions.length ? '결과 보기 (Enter)' : '다음 (Enter)';
   $('#quiz-speak-btn').hidden = false;
+  $('#quiz-dunno-btn').hidden = true;
   $('#quiz-feedback').hidden = false;
+  if (q.dir === 'ko2en') autoSpeak(q.word);
 
   if (q.type === 'input') {
     const input = $('#quiz-answer');
@@ -534,6 +565,7 @@ function commitResults(answers) {
 
 /** 테스트 종료 → 통계 반영 + 기록 저장 + 결과 화면 */
 function finishTest() {
+  if (quiz.diagnostic) { finishDiagnostic(); return; }
   const answers = quiz.answers;
   commitResults(answers);
   addHistoryFromQuiz(quiz);
@@ -558,6 +590,9 @@ function finishTest() {
   $('#result-wrong-wrap').hidden = wrong.length === 0;
   $('#result-perfect').hidden = wrong.length > 0 || total === 0;
   $('#retry-wrong-btn').hidden = wrong.length === 0;
+  $('#retry-all-btn').hidden = total === 0;
+  $('#diag-result').hidden = true;
+  $('#diag-apply-btn').hidden = true;
 
   // "틀린 것만 다시 풀기", "오답 노트", "외움 표시"용 단어 ID
   quiz.lastWrongIds = [...new Set(wrong.map(a => a.question.wordId))];
@@ -595,6 +630,14 @@ function markCorrectKnown() {
   setMarkedKnown(quiz.lastCorrectIds, true);
   $('#mark-known-btn').disabled = true;
   showToast(`${quiz.lastCorrectIds.length}개를 외움으로 표시했습니다.`);
+}
+
+/** 전체 다시 풀기: 이번 시험의 단어를 같은 설정으로 한 번 더 */
+function retryAll() {
+  if (!quiz || !quiz.questions) return;
+  const words = [...new Set(quiz.questions.map(q => q.wordId))].map(getWordById).filter(Boolean);
+  if (words.length === 0) { showToast('다시 풀 단어가 없습니다.'); return; }
+  startTest(words, { scope: quiz.scope, scopeName: `${quiz.scopeName.replace(/ · (틀린 것만|다시 풀기)$/, '')} · 다시 풀기`, settings: quiz.settings });
 }
 
 function retryWrong() {
@@ -723,6 +766,8 @@ function initTestView() {
     if (btn) handleChoice(Number(btn.dataset.index));
   });
   $('#quiz-accept-btn').addEventListener('click', acceptAnswer);
+  $('#quiz-dunno-btn').addEventListener('click', handleDunno);
+  $('#retry-all-btn').addEventListener('click', retryAll);
   $('#quiz-next-btn').addEventListener('click', nextQuestion);
   $('#quiz-speak-btn').addEventListener('click', () => { const q = currentQuestion(); if (q) speak(q.word); });
   $('#quit-test-btn').addEventListener('click', quitTest);

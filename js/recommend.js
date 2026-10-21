@@ -71,7 +71,7 @@ function computeRecommendations(libId) {
 
   // 1) 같은 단어팩: 단어팩에서 온 라이브러리, 또는 이 라이브러리 단어가 많이 든 단어팩
   let packs = [];
-  if (lib && lib.packId) packs = WORD_PACKS.filter(p => p.id === lib.packId);
+  if (lib && lib.packId) packs = [findPack(lib.packId)].filter(Boolean);
   else if (libWords.length) {
     packs = WORD_PACKS
       .map(p => ({ p, n: packWordList(p).filter(it => inLib.has(wordKey(it.word))).length }))
@@ -93,9 +93,18 @@ function computeRecommendations(libId) {
     (roots.get(r) || []).forEach(e => { if (wordKey(e.word) !== wordKey(w.word)) fromRoot.push(withMine(e, `${w.word}와(과) 어근이 비슷`)); });
   });
 
+  // 4) 내 수준의 사전 단어 (설정에서 고른 수준과 한 단계 위)
+  const my = state.settings.userLevel;
+  const mine = myWordKeySet();
+  const fromLevel = my
+    ? shuffle([...levelEntries(my), ...levelEntries(Math.min(9, my + 1))]).slice(0, 80)
+      .filter(e => !mine.has(wordKey(e.word)))
+      .map(e => withMine(e, `내 수준 · ${levelName(e.level)}`))
+    : [];
+
   // 섞어서 최대 10개 (출처마다 몫을 나누고, 모자라면 다른 출처로 채움)
-  const items = [...pick(fromRoot, 4), ...pick(fromWrong, 3), ...pick(fromPack, 4)];
-  const rest = [...fromRoot, ...fromPack, ...fromWrong];
+  const items = [...pick(fromRoot, 3), ...pick(fromWrong, 2), ...pick(fromPack, 3), ...pick(fromLevel, 3)];
+  const rest = [...fromRoot, ...fromPack, ...fromLevel, ...fromWrong];
   items.push(...pick(rest, REC_LIMIT - items.length));
   return shuffle(items).slice(0, REC_LIMIT);
 }

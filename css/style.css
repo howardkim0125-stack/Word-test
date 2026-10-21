@@ -825,6 +825,106 @@ button, .tab { -webkit-touch-callout: none; -webkit-user-select: none; user-sele
 }
 .install-status { margin: 0 0 8px; font-weight: 600; }
 
+/* ===================== 난이도 (초등 1 ~ 고등 3) ===================== */
+.lv-el { --lv: #059669; --lv-soft: #d1fae5; }
+.lv-mid { --lv: #0284c7; --lv-soft: #e0f2fe; }
+.lv-high { --lv: #7c3aed; --lv-soft: #ede9fe; }
+@media (prefers-color-scheme: dark) {
+  .lv-el { --lv: #34d399; --lv-soft: #12352a; }
+  .lv-mid { --lv: #38bdf8; --lv-soft: #0f2a3a; }
+  .lv-high { --lv: #a78bfa; --lv-soft: #2a2145; }
+}
+.lv-badge { display: inline-block; font-size: 0.72rem; font-weight: 700; line-height: 1.5; padding: 0 7px; border-radius: 6px; white-space: nowrap; vertical-align: middle; color: var(--lv); background: var(--lv-soft); }
+
+.level-prompt { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border: 2px solid var(--primary); }
+.level-prompt-text { flex: 1 1 260px; display: flex; flex-direction: column; }
+.level-prompt-text .hint { margin: 2px 0 0; }
+.level-prompt .btn-row { flex: 1 1 360px; }
+.level-prompt .btn-row .btn { flex: 1 1 auto; }
+
+.level-grid { display: flex; flex-direction: column; gap: 10px; }
+.level-row { display: grid; grid-template-columns: 48px repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+.level-group { align-self: center; font-weight: 800; color: var(--muted); font-size: 0.95rem; }
+.level-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 84px;
+  padding: 10px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-left: 6px solid var(--lv);
+  border-radius: 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.level-card:active { transform: scale(0.98); }
+.level-card.mine { border-color: var(--lv); box-shadow: 0 0 0 3px var(--lv-soft); }
+.level-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-weight: 800; font-size: 1.05rem; }
+.level-mine { font-style: normal; font-size: 0.7rem; padding: 0 7px; border-radius: 999px; color: #fff; background: var(--lv); }
+.level-meta { font-size: 0.8rem; color: var(--muted); }
+.level-bar { position: relative; height: 6px; margin-top: auto; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.level-bar i, .level-bar b { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--lv); }
+.level-bar i { opacity: 0.35; }
+
+.level-pick { display: flex; flex-direction: column; gap: 10px; }
+.level-pick-row { display: grid; grid-template-columns: 48px repeat(3, minmax(0, 1fr)); gap: 8px; align-items: center; }
+.level-pick-row .btn { padding: 8px 6px; }
+
+.diag-result { margin: 4px 0 16px; }
+.diag-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.diag-list li { display: grid; grid-template-columns: 70px auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 8px; border-radius: 8px; }
+.diag-list li.rec { background: var(--primary-soft); font-weight: 700; }
+.diag-dots { display: flex; gap: 4px; }
+.diag-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); }
+.diag-dot.ok { background: var(--ok); border-color: var(--ok); }
+.diag-dot.bad { background: var(--bad); border-color: var(--bad); }
+.diag-legend .diag-dot { display: inline-block; width: 11px; height: 11px; vertical-align: -1px; }
+.diag-words { font-size: 0.85rem; font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 문제: 품사 안내 · 모르겠어요 */
+.quiz-pos { text-align: center; margin: -12px 0 16px; color: var(--muted); font-size: 0.95rem; }
+.quiz-dunno-row { display: flex; justify-content: center; margin-top: 10px; }
+.quiz-prompt .pos-group { display: inline-block; margin: 0 8px; }
+.quiz-prompt .pos, .fc-meaning .pos { font-size: 0.85rem; vertical-align: middle; }
+.feedback-answer .pos-group { margin-right: 8px; }
+.feedback-means { color: var(--muted); }
+
+/* 자동완성: 단어·난이도·안내 / 품사별 뜻 두 줄 */
+.ac-item { flex-direction: column; align-items: stretch; gap: 2px; }
+.ac-top { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.ac-mean { white-space: normal; font-size: 0.95rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ac-sense { margin-right: 10px; }
+.ac-mean mark { color: inherit; background: var(--warn-soft); border-radius: 4px; padding: 0 2px; }
+
+.list-more { margin-top: 12px; }
+
+/* 통계: 난이도별 내 단어 */
+.level-stats { list-style: none; margin: 0 0 8px; padding: 0; }
+.level-stats li { display: grid; grid-template-columns: 36px minmax(0, 1fr) 120px; gap: 10px; align-items: center; padding: 4px 0; }
+.ls-name { font-weight: 700; color: var(--muted); }
+.ls-bar { height: 12px; background: var(--bg); border-radius: 999px; overflow: hidden; }
+.ls-bar i { display: block; height: 100%; min-width: 2px; border-radius: 999px; background: var(--lv); }
+.ls-num { font-weight: 700; }
+.ls-num small { font-weight: 400; color: var(--ok); }
+
+/* 설정 */
+.inline-row { display: flex; gap: 10px; }
+.inline-row select { flex: 1; }
+.check-field { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; cursor: pointer; }
+.check-field input { width: 26px; height: 26px; flex: 0 0 auto; margin-top: 2px; }
+.check-field span { font-weight: 600; }
+.check-field small { display: block; font-weight: 400; color: var(--muted); }
+
+/* 암기 카드: 난이도 · 품사별 뜻 */
+.flashcard { position: relative; }
+.fc-level { position: absolute; top: 14px; left: 16px; }
+.fc-level:empty { display: none; }
+.fc-meaning .pos-group { display: block; }
+
 /* ===================== 휴대폰 (세로 640px 이하, 가로로 든 휴대폰) ===================== */
 @media (max-width: 640px), (max-height: 500px) and (orientation: landscape) {
   :root { --tabbar-h: 60px; }
@@ -939,6 +1039,16 @@ button, .tab { -webkit-touch-callout: none; -webkit-user-select: none; user-sele
   /* 카드 */
   .fc-word { font-size: 2.1rem; }
   .flashcard { min-height: 240px; }
+
+  /* 난이도: 초등·중등·고등 이름은 위로, 카드 3개씩 */
+  .level-row, .level-pick-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .level-row .level-group, .level-pick-row .level-group { grid-column: 1 / -1; margin-bottom: -4px; font-size: 0.85rem; }
+  .level-card { min-height: 76px; padding: 8px 10px; border-left-width: 5px; }
+  .level-name { font-size: 0.98rem; }
+  .level-meta { font-size: 0.72rem; }
+  .diag-list li { grid-template-columns: 60px minmax(0, 1fr); }
+  .diag-words { grid-column: 1 / -1; }
+  .level-stats li { grid-template-columns: 30px minmax(0, 1fr) 100px; }
 }
 
 /* ===================== 휴대폰 가로 ===================== */
