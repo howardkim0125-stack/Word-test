@@ -1,8 +1,8 @@
 /* ============================================================
- * app.js — 앱 시작, 탭 전환, 설정 화면, 서비스 워커 등록
+ * app.js — 앱 시작, 탭 전환, 설정 화면, 서비스 워커 등록, 앱 설치 안내
  * ============================================================ */
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const TAB_KEY = 'wt.tab';
 
 /* ---------- 탭 전환 ---------- */
@@ -100,6 +100,92 @@ function initSettingsView() {
   $('#delete-all-btn').addEventListener('click', deleteAllWords);
 }
 
+/* ---------- 앱 설치 (휴대폰·태블릿 홈 화면) ---------- */
+
+let deferredInstall = null; // 안드로이드 크롬의 설치 요청 (beforeinstallprompt)
+
+/** 홈 화면 앱으로 실행 중인지 */
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+
+/** 아이폰·아이패드인지 (아이패드는 데스크톱 Safari처럼 보이기도 함) */
+function isIOS() {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+/** 설정의 설치 상태 + 상단 설치 안내 배너 */
+function renderInstallUI() {
+  const standalone = isStandalone();
+  let status;
+  if (standalone) status = '✓ 앱으로 실행 중이에요.';
+  else if (deferredInstall) status = '이 기기에 앱으로 설치할 수 있어요. 설치하면 주소창 없이 열리고 인터넷이 없어도 돼요.';
+  else if (isIOS()) status = 'Safari 아래(아이패드는 위)의 공유 버튼(□↑) → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있어요.';
+  else status = '브라우저 메뉴(⋮) → "앱 설치" 또는 "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있어요.';
+  $('#install-status').textContent = status;
+  $('#install-btn').hidden = standalone || !deferredInstall;
+
+  // 배너: 앱으로 실행 중이 아니고, 설치할 수 있거나 iOS이고, 닫은 적이 없을 때
+  const show = !standalone && !state.meta.installHintDismissed && (!!deferredInstall || isIOS());
+  $('#install-banner').hidden = !show;
+  $('#install-banner-text').textContent = deferredInstall
+    ? '홈 화면에 설치하면 앱처럼 쓸 수 있어요.'
+    : '공유 버튼(□↑) → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있어요.';
+  $('#install-banner-btn').hidden = !deferredInstall;
+}
+
+async function promptInstall() {
+  if (!deferredInstall) { renderInstallUI(); return; }
+  const ev = deferredInstall;
+  ev.prompt();
+  try {
+    const choice = await ev.userChoice;
+    if (choice && choice.outcome === 'accepted') showToast('홈 화면에 설치했어요.');
+  } catch (e) { /* 무시 */ }
+  deferredInstall = null;
+  renderInstallUI();
+}
+
+function initInstall() {
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); // 브라우저 기본 안내 대신 앱의 버튼으로
+    deferredInstall = e;
+    renderInstallUI();
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null;
+    renderInstallUI();
+  });
+  $('#install-btn').addEventListener('click', promptInstall);
+  $('#install-banner-btn').addEventListener('click', promptInstall);
+  $('#install-banner-close').addEventListener('click', () => {
+    state.meta.installHintDismissed = Date.now();
+    saveMeta();
+    renderInstallUI();
+  });
+  renderInstallUI();
+}
+
+/* ---------- 휴대폰: 글자를 입력하는 동안 아래 탭 바 숨기기 (키보드 위로 떠오르지 않게) ---------- */
+
+function initTypingMode() {
+  const isTextField = el => el && (el.tagName === 'TEXTAREA' ||
+    (el.tagName === 'INPUT' && ['text', 'search', 'number', 'email', ''].includes(el.type)));
+  let timer = null;
+  document.addEventListener('focusin', e => {
+    if (!isTextField(e.target)) return;
+    clearTimeout(timer);
+    document.body.classList.add('typing');
+  });
+  document.addEventListener('focusout', () => {
+    clearTimeout(timer);
+    // 입력칸 사이를 옮겨 다닐 때 깜빡이지 않게 잠깐 기다림
+    timer = setTimeout(() => {
+      if (!isTextField(document.activeElement)) document.body.classList.remove('typing');
+    }, 150);
+  });
+}
+
 /* ---------- 서비스 워커 (오프라인 동작, 업데이트) ---------- */
 
 let swRegistration = null;
@@ -186,13 +272,19 @@ function init() {
   initCards();
   initRecommendations();
   initStats();
+  initInstall();
+  initTypingMode();
 
   $$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
   $('#update-apply-btn').addEventListener('click', applyUpdate);
 
+  // 시작 탭: 홈 화면 바로가기(?tab=test 등) → 지난번 탭 → 단어가 있으면 테스트
+  const TABS = ['add', 'list', 'test', 'stats', 'settings'];
+  const urlTab = new URLSearchParams(location.search).get('tab');
   let startTab = 'add';
   try { startTab = sessionStorage.getItem(TAB_KEY) || (state.words.length ? 'test' : 'add'); } catch (e) { /* 무시 */ }
-  switchTab(startTab);
+  if (TABS.includes(urlTab)) startTab = urlTab;
+  switchTab(TABS.includes(startTab) ? startTab : 'add');
 
   // 다른 탭/창에서 데이터가 바뀌면 다시 불러오기
   window.addEventListener('storage', e => {

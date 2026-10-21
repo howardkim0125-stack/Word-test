@@ -808,3 +808,146 @@ body.cards-open { overflow: hidden; }
 @media (max-width: 600px) {
   .tab { font-size: 0.9rem; padding: 0 2px; }
 }
+
+/* ===================== 앱처럼: 공통 ===================== */
+html { touch-action: manipulation; }           /* 두 번 탭 확대 막기 */
+body { overscroll-behavior-y: none; }          /* 당겨서 새로고침으로 시험이 끊기지 않게 */
+button, .tab { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.tab-icon {
+  display: none;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.install-status { margin: 0 0 8px; font-weight: 600; }
+
+/* ===================== 휴대폰 (세로 640px 이하, 가로로 든 휴대폰) ===================== */
+@media (max-width: 640px), (max-height: 500px) and (orientation: landscape) {
+  :root { --tabbar-h: 60px; }
+
+  /* 탭은 아래 고정 탭 바로 (아이콘 + 이름) */
+  .app-header { padding-top: calc(env(safe-area-inset-top) + 4px); }
+  .app-title { font-size: 1.05rem; margin: 6px 0 10px; }
+  .tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 25;
+    gap: 0;
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+  }
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: var(--tabbar-h);
+    padding: 4px 0;
+    font-size: 0.72rem;
+    border-bottom: none;
+  }
+  .tab-icon { display: block; }
+  .tab.active { border-bottom: none; }
+
+  /* 아래 탭 바만큼 내용·토스트·하단 바를 올림 */
+  .app-main { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px); }
+  .toast { bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 12px); }
+  .select-bar { bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); padding-bottom: 12px; }
+  body.has-select-bar .app-main { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 140px); }
+  body.has-select-bar .toast { bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 84px); }
+
+  /* 글자를 입력하는 동안에는 탭 바를 숨김 (키보드 위로 떠오르지 않게) */
+  body.typing .tabs { display: none; }
+  body.typing .app-main { padding-bottom: 24px; }
+  body.typing .select-bar { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom) + 12px); }
+  body.typing .toast { bottom: calc(env(safe-area-inset-bottom) + 16px); }
+
+  /* 대화상자는 아래에서 올라오는 시트로 */
+  .modal { align-items: flex-end; padding: 0; }
+  .modal-box {
+    max-width: none;
+    max-height: 88vh;
+    max-height: 88dvh;
+    border-radius: 18px 18px 0 0;
+    padding: 20px 16px calc(env(safe-area-inset-bottom) + 16px);
+    animation: sheet-up 0.2s ease-out;
+  }
+  .banner { width: calc(100% - 24px); margin-top: 8px; }
+}
+@keyframes sheet-up {
+  from { transform: translateY(40px); opacity: 0.6; }
+  to { transform: none; opacity: 1; }
+}
+
+/* ===================== 휴대폰 세로 ===================== */
+@media (max-width: 640px) {
+  body { font-size: 17px; }
+  h2 { font-size: 1.15rem; }
+  .app-main { padding-left: calc(env(safe-area-inset-left) + 12px); padding-right: calc(env(safe-area-inset-right) + 12px); }
+  .card { padding: 16px; }
+
+  /* 라이브러리 홈: 2열 카드 */
+  .lib-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .lib-cover span { font-size: 1rem; }
+
+  /* 라이브러리 상세: 작은 표지 옆에 이름, 버튼은 아래 한 줄씩 */
+  .lib-hero { display: grid; grid-template-columns: 96px minmax(0, 1fr); column-gap: 14px; row-gap: 0; align-items: end; }
+  .lib-hero-info { display: contents; }
+  #lib-hero-cover { grid-row: 1 / span 3; width: 96px; padding: 8px; }
+  #lib-hero-cover span { font-size: 0.85rem; }
+  .lib-kind, .lib-hero-name, #lib-hero-desc { grid-column: 2; }
+  .lib-hero-name { font-size: 1.4rem; margin: 0 0 4px; }
+  #lib-hero-desc { margin: 0; }
+  .lib-hero-progress, .lib-hero-last, .lib-hero-actions { grid-column: 1 / -1; }
+  .lib-hero-progress { max-width: none; margin-top: 10px; }
+  .lib-hero-actions .btn { flex: 1 1 auto; }
+
+  /* 단어 목록 */
+  .word-row { padding: 12px; gap: 10px; }
+  .word-row .btn-icon, .rec-item .btn-icon, .top-item .btn-icon { width: 44px; height: 44px; font-size: 1.2rem; }
+  .icon-btn { width: 44px; height: 44px; font-size: 1.2rem; }
+  .word-actions { gap: 6px; }
+  .word-text { font-size: 1.15rem; }
+  .word-stats { font-size: 0.82rem; }
+
+  /* 테스트 */
+  .segmented button { font-size: 0.92rem; padding: 8px 4px; }
+  .today-card { gap: 8px; padding: 12px; }
+  .today-item span { font-size: 0.75rem; }
+  .today-item b { font-size: 1.15rem; }
+  .resume-actions { width: 100%; }
+  .resume-actions .btn { flex: 1; }
+  .quiz-prompt { font-size: 1.8rem; }
+  .result-table th, .result-table td { padding: 8px 4px; font-size: 0.95rem; }
+  .speak-cell { width: 48px; }
+
+  /* 그래프 글자: 화면에 맞춰 줄어드는 만큼 크게 */
+  .stats-chart .chart-label { font-size: 22px; }
+  .history-chart .bar-label { font-size: 20px; }
+  .top-item { flex-wrap: wrap; }
+  .top-meta { width: 100%; padding-left: 78px; margin-top: -6px; }
+
+  /* 카드 */
+  .fc-word { font-size: 2.1rem; }
+  .flashcard { min-height: 240px; }
+}
+
+/* ===================== 휴대폰 가로 ===================== */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root { --tabbar-h: 48px; }
+  .app-header { position: static; padding: 0; border-bottom: none; }
+  .app-title { display: none; }
+  .tab { flex-direction: row; gap: 6px; font-size: 0.85rem; }
+  .flashcard { min-height: 150px; padding: 16px; }
+  .cards-actions .btn { min-height: 52px; }
+  .fc-word { font-size: 1.9rem; }
+}
