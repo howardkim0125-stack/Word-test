@@ -1,22 +1,26 @@
 /* ============================================================
  * storage.js — localStorage 저장/불러오기
- *  - 단어 목록, 설정, 백업 정보를 각각 별도 키로 저장
+ *  - 단어 목록, 라이브러리, 설정, 백업 정보 등을 각각 별도 키로 저장
+ *  - 새 필드는 normalize 함수에서 기본값을 채워 예전 데이터·백업도 그대로 읽힘
  * ============================================================ */
 
 const STORAGE_KEYS = {
   words: 'wt.words',
   libraries: 'wt.libraries',
   settings: 'wt.settings',
-  meta: 'wt.meta' // 마지막 백업 시각, 최초 사용 시각 등
+  meta: 'wt.meta', // 마지막 백업 시각, 최초 사용 시각 등
+  quizRun: 'wt.quizRun', // 진행 중인 시험 (이어서 풀기)
+  recentAdds: 'wt.recentAdds' // 방금 등록한 단어 (되돌리기용)
 };
 
 const DEFAULT_SETTINGS = {
-  count: 20,          // 출제 개수
+  count: 20,          // 출제 개수 (0 = 전체)
   direction: 'en2ko', // en2ko | ko2en | mix
-  format: 'input',    // input(주관식) | choice(객관식)
+  format: 'input',    // input(주관식) | choice(객관식) | auto(추천 조합: 영→한 객관식, 한→영 주관식)
   mode: 'random',     // random | weighted
   testLibrary: 'all', // 출제 범위: 'all'(모든 단어) 또는 라이브러리 ID
-  addLibrary: ''      // 단어 등록 시 넣을 라이브러리 ID ('' = 없음)
+  addLibrary: '__default__', // 단어 등록 시 넣을 라이브러리 ID ('' = 없음, '__default__' = 기본 라이브러리)
+  defaultLibrary: ''  // ＋ 버튼으로 담는 기본 라이브러리 ID ('' = "외울 단어"를 필요할 때 자동 생성)
 };
 
 // 앱 전체에서 공유하는 상태
@@ -57,7 +61,7 @@ function loadAll() {
   const libs = readJSON(STORAGE_KEYS.libraries, []);
   state.libraries = Array.isArray(libs) ? libs.map(normalizeLibrary).filter(Boolean) : [];
   pruneLibraryWordIds();
-  state.settings = { ...DEFAULT_SETTINGS, ...readJSON(STORAGE_KEYS.settings, {}) };
+  state.settings = normalizeSettings(readJSON(STORAGE_KEYS.settings, {}));
   state.meta = { lastBackup: null, firstUse: null, ...readJSON(STORAGE_KEYS.meta, {}) };
   if (!state.meta.firstUse) {
     state.meta.firstUse = Date.now();
@@ -69,6 +73,23 @@ function saveWords() { return writeJSON(STORAGE_KEYS.words, state.words); }
 function saveLibraries() { return writeJSON(STORAGE_KEYS.libraries, state.libraries); }
 function saveSettings() { return writeJSON(STORAGE_KEYS.settings, state.settings); }
 function saveMeta() { return writeJSON(STORAGE_KEYS.meta, state.meta); }
+
+/**
+ * 설정 형식 맞추기 (예전 설정에 없는 값은 기본값으로)
+ *  - 예전 버전에서 '라이브러리 없이'('')로 저장된 등록 대상은 기본 라이브러리로 바꿈
+ *    (그때는 기본값이 ''뿐이라 사용자가 고른 값이 아님)
+ */
+function normalizeSettings(raw) {
+  const s = raw && typeof raw === 'object' ? { ...raw } : {};
+  if (!('defaultLibrary' in s) && !s.addLibrary) s.addLibrary = '__default__';
+  const out = { ...DEFAULT_SETTINGS, ...s };
+  const count = parseInt(out.count, 10);
+  out.count = Number.isFinite(count) && count >= 0 ? count : DEFAULT_SETTINGS.count;
+  if (!['en2ko', 'ko2en', 'mix'].includes(out.direction)) out.direction = DEFAULT_SETTINGS.direction;
+  if (!['input', 'choice', 'auto'].includes(out.format)) out.format = DEFAULT_SETTINGS.format;
+  if (!['random', 'weighted'].includes(out.mode)) out.mode = DEFAULT_SETTINGS.mode;
+  return out;
+}
 
 /**
  * 단어 레코드 형식을 맞춰 줌 (가져오기/구버전 데이터 대비)
@@ -98,7 +119,8 @@ function normalizeWordRecord(r) {
 
 /**
  * 라이브러리 레코드 형식 맞추기
- * 형식: { id, name, desc, color(표지 색 번호), wordIds[], createdAt, packId(추천 단어팩에서 왔으면 그 ID) }
+ * 형식: { id, name, desc, color(표지 색 번호), wordIds[], createdAt, packId(추천 단어팩에서 왔으면 그 ID),
+ *         lastUsedAt(마지막으로 단어를 담은 시각 — 담기 시트 정렬용) }
  *  - 단어 하나가 여러 라이브러리에 들어갈 수 있음 (스포티파이 플레이리스트처럼)
  */
 function normalizeLibrary(l) {
@@ -110,7 +132,8 @@ function normalizeLibrary(l) {
     color: Number.isInteger(l.color) ? l.color : 0,
     wordIds: Array.isArray(l.wordIds) ? [...new Set(l.wordIds.map(String))] : [],
     createdAt: l.createdAt || Date.now(),
-    packId: l.packId || null
+    packId: l.packId || null,
+    lastUsedAt: Number(l.lastUsedAt) || 0
   };
 }
 

@@ -37,17 +37,20 @@ function refreshAllViews() {
 /* ---------- 설정 화면 ---------- */
 
 function renderSettings() {
-  $('#setting-count').value = state.settings.count;
+  renderDefaultLibrarySelect();
   renderBackupInfo();
   $('#app-version').textContent = `버전 ${APP_VERSION} · 단어 ${state.words.length}개`;
 }
 
-/** 출제 개수 저장 (1~500 사이로 제한) */
-function setQuestionCount(value) {
-  const n = Math.min(500, Math.max(1, parseInt(value, 10) || DEFAULT_SETTINGS.count));
-  state.settings.count = n;
-  saveSettings();
-  $('#setting-count').value = n;
+/** 기본 라이브러리 선택 상자 (없으면 "외울 단어"를 처음 담을 때 만듦) */
+function renderDefaultLibrarySelect() {
+  const sel = $('#setting-default-lib');
+  const def = getDefaultLibrary();
+  fillLibrarySelect(sel, { selected: def ? def.id : '' });
+  if (!def) {
+    sel.insertBefore(new Option(`${DEFAULT_LIB_NAME} (처음 담을 때 자동으로 만들어요)`, ''), sel.firstChild);
+    sel.value = '';
+  }
 }
 
 async function resetAllStats() {
@@ -73,30 +76,83 @@ async function deleteAllWords() {
 }
 
 function initSettingsView() {
-  $('#setting-count').addEventListener('change', e => setQuestionCount(e.target.value));
-  $$('.stepper [data-step]').forEach(btn => {
-    btn.addEventListener('click', () => setQuestionCount(state.settings.count + Number(btn.dataset.step)));
+  $('#setting-default-lib').addEventListener('change', e => {
+    state.settings.defaultLibrary = e.target.value;
+    saveSettings();
+    showToast(`기본 라이브러리: ${defaultLibraryName()}`);
   });
+  $('#refresh-app-btn').addEventListener('click', refreshAppCache);
   $('#add-samples-btn').addEventListener('click', () => { addSampleWords(); renderSettings(); });
   $('#remove-samples-btn').addEventListener('click', async () => { await removeSampleWords(); renderSettings(); });
   $('#reset-stats-btn').addEventListener('click', resetAllStats);
   $('#delete-all-btn').addEventListener('click', deleteAllWords);
 }
 
-/* ---------- 서비스 워커 (오프라인 동작) ---------- */
+/* ---------- 서비스 워커 (오프라인 동작, 업데이트) ---------- */
+
+let swRegistration = null;
+let waitingWorker = null;   // 설치돼서 기다리는 새 버전
+let updateRequested = false; // "지금 적용"을 눌렀을 때만 새로고침 (처음 설치 때는 안 함)
+
+/** "새 버전이 있어요 · 지금 적용" 배너 */
+function showUpdateBanner(worker) {
+  waitingWorker = worker;
+  $('#update-banner').hidden = false;
+}
+
+/** 기다리던 새 버전으로 교체 → controllerchange에서 새로고침 */
+function applyUpdate() {
+  if (!waitingWorker) { location.reload(); return; }
+  updateRequested = true;
+  waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  // 혹시 교체 신호가 안 오면 잠시 뒤 직접 새로고침
+  setTimeout(() => location.reload(), 3000);
+}
+
+function watchForUpdate(reg) {
+  if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(reg.waiting);
+  reg.addEventListener('updatefound', () => {
+    const worker = reg.installing;
+    worker && worker.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdateBanner(worker);
+    });
+  });
+}
+
+/**
+ * 설정 → "앱 새로고침(캐시 갱신)": 저장해 둔 앱 파일을 지우고 새로 받음 (단어 데이터는 그대로)
+ */
+async function refreshAppCache() {
+  if (!navigator.onLine) { showToast('인터넷에 연결된 상태에서 눌러 주세요.'); return; }
+  showToast('새로 받는 중…', 5000);
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(k => k.startsWith('wordbook-')).map(k => caches.delete(k)));
+    }
+    if (swRegistration) {
+      await swRegistration.update().catch(() => {});
+      const worker = swRegistration.waiting || swRegistration.installing;
+      if (worker) { waitingWorker = worker; applyUpdate(); return; }
+    }
+  } catch (e) {
+    console.warn('캐시 갱신 실패:', e);
+  }
+  location.reload();
+}
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (updateRequested) location.reload();
+  });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').then(reg => {
-      // 새 버전이 설치되면 알려 주기
-      reg.addEventListener('updatefound', () => {
-        const worker = reg.installing;
-        worker && worker.addEventListener('statechange', () => {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            showToast('새 버전이 준비되었습니다. 앱을 다시 열면 적용됩니다.', 4000);
-          }
-        });
+      swRegistration = reg;
+      watchForUpdate(reg);
+      // 홈 화면 앱은 오래 켜 두므로 다시 볼 때마다 새 버전 확인
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
       });
     }).catch(err => console.warn('서비스 워커 등록 실패:', err));
   });
@@ -117,6 +173,7 @@ function init() {
   initBackup();
 
   $$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+  $('#update-apply-btn').addEventListener('click', applyUpdate);
 
   let startTab = 'add';
   try { startTab = sessionStorage.getItem(TAB_KEY) || (state.words.length ? 'test' : 'add'); } catch (e) { /* 무시 */ }

@@ -17,9 +17,12 @@ const APP_FILES = [
   './js/speech.js',
   './js/samples.js',
   './js/packs.js',
+  './js/dict-data.js',
+  './js/dict.js',
   './js/libraries.js',
   './js/words.js',
   './js/list.js',
+  './js/register.js',
   './js/quiz.js',
   './js/backup.js',
   './js/app.js',
@@ -30,12 +33,14 @@ const APP_FILES = [
 ];
 
 // 설치: 앱 파일 미리 캐시
+//  - 이미 쓰던 버전이 있으면 바로 바꾸지 않고 기다림 → 앱에서 "지금 적용"을 누르면 교체
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_FILES))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_FILES)));
+});
+
+// 앱에서 "지금 적용"을 누르면 기다리던 새 버전으로 교체
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // 활성화: 예전 버전 캐시 삭제

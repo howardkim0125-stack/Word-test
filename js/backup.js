@@ -130,7 +130,7 @@ async function importBackupFile(file) {
     state.words = dedupeWords(words);
     state.libraries = libraries;
     pruneLibraryWordIds();
-    if (settings) state.settings = { ...DEFAULT_SETTINGS, ...settings };
+    if (settings) state.settings = normalizeSettings(settings);
     saveSettings();
   } else {
     let added = 0, updated = 0;

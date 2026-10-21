@@ -20,6 +20,9 @@ const LIB_COLORS = [
 // 지금 열려 있는 라이브러리 ('all' 또는 라이브러리 ID)
 let currentLibId = 'all';
 
+// ＋ 버튼으로 담는 기본 라이브러리 (스포티파이의 '좋아요 표시한 곡'처럼)
+const DEFAULT_LIB_NAME = '외울 단어';
+
 /* ---------- 데이터 조작 ---------- */
 
 function getLibrary(id) {
@@ -43,6 +46,34 @@ function libraryName(libId) {
 /** 단어가 들어 있는 라이브러리 목록 */
 function librariesOfWord(wordId) {
   return state.libraries.filter(l => l.wordIds.includes(wordId));
+}
+
+/** 기본 라이브러리 (설정에서 고른 것). 아직 없으면 null */
+function getDefaultLibrary() {
+  return getLibrary(state.settings.defaultLibrary);
+}
+
+/** 기본 라이브러리를 가져오고, 없으면 "외울 단어"를 만들어 기본으로 지정 */
+function ensureDefaultLibrary() {
+  let lib = getDefaultLibrary();
+  if (lib) return lib;
+  lib = state.libraries.find(l => l.name === DEFAULT_LIB_NAME) ||
+    createLibrary({ name: DEFAULT_LIB_NAME, desc: '＋ 버튼으로 담은 단어', color: 3 });
+  state.settings.defaultLibrary = lib.id;
+  saveSettings();
+  return lib;
+}
+
+function defaultLibraryName() {
+  return getDefaultLibrary()?.name || DEFAULT_LIB_NAME;
+}
+
+/** 라이브러리를 방금 썼다고 표시 (담기 시트에서 맨 위로) */
+function touchLibrary(libId) {
+  const lib = getLibrary(libId);
+  if (!lib) return;
+  lib.lastUsedAt = Date.now();
+  saveLibraries();
 }
 
 function createLibrary({ name, desc = '', color = null, packId = null }) {
@@ -100,8 +131,10 @@ function deleteLibrary(libId, withWords) {
     saveWords();
   }
   saveLibraries();
-  if (state.settings.testLibrary === libId) { state.settings.testLibrary = 'all'; saveSettings(); }
-  if (state.settings.addLibrary === libId) { state.settings.addLibrary = ''; saveSettings(); }
+  if (state.settings.testLibrary === libId) state.settings.testLibrary = 'all';
+  if (state.settings.addLibrary === libId) state.settings.addLibrary = '__default__';
+  if (state.settings.defaultLibrary === libId) state.settings.defaultLibrary = ''; // 다음에 담을 때 다시 만듦
+  saveSettings();
   return removed;
 }
 
@@ -314,45 +347,80 @@ async function openPackPreview(packId) {
   }
 }
 
-/** 단어를 어느 라이브러리에 넣을지 고르는 대화상자 (체크박스) */
-async function manageWordLibraries(wordId) {
-  const w = getWordById(wordId);
-  if (!w) return;
-  const rows = state.libraries.map(l => `
-    <label class="check-row">
-      <input type="checkbox" value="${l.id}" ${l.wordIds.includes(wordId) ? 'checked' : ''}>
-      ${coverHtml(l, 'lib-cover-mini')}<span>${escapeHtml(l.name)}</span>
-    </label>`).join('');
-  const html = (rows || '<p class="hint">아직 라이브러리가 없습니다.</p>') +
-    '<button type="button" class="btn btn-small" id="wl-new-btn">＋ 새 라이브러리</button>';
+/**
+ * 라이브러리 담기 시트 (스포티파이 "플레이리스트에 추가"처럼)
+ *  - 체크하는 즉시 저장 (저장 버튼 없음), 최근 쓴 라이브러리가 맨 위, 맨 아래 "＋ 새 라이브러리"
+ *  - 여러 단어를 한꺼번에 담을 수도 있음 (일부만 들어 있으면 체크 상자가 '-' 상태)
+ */
+async function openLibrarySheet(wordIds, after = () => {}) {
+  const ids = [].concat(wordIds).filter(id => getWordById(id));
+  if (!ids.length) return;
+  const title = ids.length === 1 ? `"${getWordById(ids[0]).word}" 담기` : `단어 ${ids.length}개 담기`;
+  const libs = state.libraries.slice().sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0) || b.createdAt - a.createdAt);
+  const rows = libs.map(l => {
+    const n = ids.filter(id => l.wordIds.includes(id)).length;
+    return `
+      <label class="check-row">
+        <input type="checkbox" value="${l.id}" ${n === ids.length ? 'checked' : ''} ${n > 0 && n < ids.length ? 'data-partial="1"' : ''}>
+        ${coverHtml(l, 'lib-cover-mini')}<span class="check-name">${escapeHtml(l.name)}</span>
+        <span class="check-meta">${l.wordIds.length}</span>
+      </label>`;
+  }).join('');
+  const html = `<div class="sheet-list">${rows || '<p class="hint">아직 라이브러리가 없습니다.</p>'}</div>
+    <button type="button" class="btn btn-block" id="sheet-new-lib">＋ 새 라이브러리</button>`;
 
-  const result = await showDialog({
-    title: `"${w.word}" 라이브러리`,
+  let wantNew = false;
+  await showDialog({
+    title,
     html,
-    buttons: [{ label: '취소', value: null }, { label: '저장', value: 'save', primary: true }],
-    onOpen: () => $('#wl-new-btn').addEventListener('click', () => { $('#modal').dataset.wantNew = '1'; $('#modal-actions .btn-primary').click(); }),
-    beforeClose: v => {
-      if (v !== 'save') return true;
-      const checked = new Set($$('#modal-body .check-row input:checked').map(i => i.value));
-      state.libraries.forEach(l => {
-        const has = l.wordIds.includes(wordId);
-        if (checked.has(l.id) && !has) l.wordIds.push(wordId);
-        if (!checked.has(l.id) && has) l.wordIds = l.wordIds.filter(id => id !== wordId);
-      });
-      saveLibraries();
-      return true;
+    buttons: [{ label: '완료', value: 'done', primary: true }],
+    onOpen: body => {
+      body.querySelectorAll('input[data-partial]').forEach(i => { i.indeterminate = true; });
+      body.onchange = e => {
+        const cb = e.target.closest('input[type="checkbox"]');
+        if (!cb) return;
+        if (cb.checked) {
+          addWordsToLibrary(cb.value, ids);
+          touchLibrary(cb.value);
+        } else {
+          const lib = getLibrary(cb.value);
+          lib.wordIds = lib.wordIds.filter(id => !ids.includes(id));
+          saveLibraries();
+        }
+        after();
+      };
+      $('#sheet-new-lib').addEventListener('click', () => { wantNew = true; closeDialog(); });
     }
   });
-  // "새 라이브러리" 버튼: 지금까지 선택을 저장한 뒤 새로 만들고 그 라이브러리에 넣기
-  if ($('#modal').dataset.wantNew) {
-    delete $('#modal').dataset.wantNew;
+  if (wantNew) {
     const lib = await openLibraryDialog();
-    if (lib) { addWordsToLibrary(lib.id, [wordId]); showToast(`"${lib.name}"에 넣었습니다.`); }
-  } else if (result === 'save') {
-    showToast('저장했습니다.');
+    if (lib) {
+      addWordsToLibrary(lib.id, ids);
+      touchLibrary(lib.id);
+      showToast(`${lib.name}에 담음`);
+    }
   }
-  renderLibraryHero();
-  renderList();
+  after();
+}
+
+/**
+ * ＋ 버튼: 첫 탭은 기본 라이브러리에 바로 담고 ✓로 바뀜.
+ * 이미 담겨 있으면(✓) 담기 시트를 엶.
+ */
+function quickAddToDefault(wordId, after = () => {}) {
+  const def = getDefaultLibrary();
+  if (def && def.wordIds.includes(wordId)) { openLibrarySheet([wordId], after); return; }
+  const lib = ensureDefaultLibrary();
+  addWordsToLibrary(lib.id, [wordId]);
+  touchLibrary(lib.id);
+  after();
+  showToast(`${lib.name}에 담음`, 4000, { label: '변경', onClick: () => openLibrarySheet([wordId], after) });
+}
+
+/** 단어가 기본 라이브러리에 있는지 (＋/✓ 표시용) */
+function isInDefaultLibrary(wordId) {
+  const def = getDefaultLibrary();
+  return !!def && def.wordIds.includes(wordId);
 }
 
 /** 라이브러리 탭에 들어올 때 */
