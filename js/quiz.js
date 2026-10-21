@@ -1,5 +1,6 @@
 /* ============================================================
  * quiz.js — 테스트 (출제, 채점, 결과, 틀린 것만 다시 풀기)
+ *  - 진행 중인 시험은 문제마다 wt.quizRun에 저장 → 앱을 다시 열면 "이어서 풀기"
  * ============================================================ */
 
 // 진행 중인 테스트 상태
@@ -8,9 +9,10 @@ let quiz = null;
  * quiz = {
  *   questions: [{ wordId, word, meanings, memo, dir, type, prompt, answerText, choices, correctIndex }],
  *   index: 현재 문제 번호,
- *   answers: [{ question, userAnswer, correct, accepted }],
- *   phase: 'answer' | 'feedback',
- *   gradedAt / shownAt: 채점·출제 시각 (Enter 중복 입력 방지용)
+ *   answers: [{ question, userAnswer, correct, near, note, accepted }]  (answers[i]는 questions[i]의 답),
+ *   phase: 'answer' | 'feedback' | 'done',
+ *   gradedAt / shownAt: 채점·출제 시각 (Enter 중복 입력 방지용),
+ *   scope: 출제 범위 라이브러리 ID 목록, scopeName, settings: 시작할 때 설정, startedAt, retry: 다시 풀기 여부
  * }
  */
 
@@ -49,8 +51,31 @@ function meaningsOverlap(a, b) {
   return b.meanings.some(m => set.has(normalizeAnswer(m)));
 }
 
+/** 철자가 얼마나 비슷한지 (클수록 비슷): 앞·뒤가 같고 편집 거리가 작을수록 높음 */
+function spellingSimilarity(a, b) {
+  a = a.toLowerCase();
+  b = b.toLowerCase();
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < a.length && s < b.length && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  return Math.min(p, 4) * 2 + Math.min(s, 3) - editDistance(a, b);
+}
+
+/** 오답 보기 후보: 내 단어장의 다른 단어 (단어가 4개 미만이면 단어팩 단어도) */
+function distractorPool(word) {
+  const pool = state.words.filter(o => o.id !== word.id);
+  if (state.words.length >= 4) return pool;
+  const extra = [];
+  WORD_PACKS.forEach(p => packWordList(p).forEach(it => {
+    if (!findWord(it.word)) extra.push({ id: `pack:${it.word}`, word: it.word, meanings: it.meanings });
+  }));
+  return pool.concat(extra);
+}
+
 /**
- * 객관식 보기 만들기 — 오답 보기는 다른 단어의 뜻(한→영이면 다른 영단어)에서 무작위로
+ * 객관식 보기 만들기 — 오답 보기는 다른 단어의 뜻(한→영이면 다른 영단어)에서,
+ * 철자가 비슷한 단어를 우선 (점수에 약간의 무작위를 더해 비슷한 점수끼리는 섞임)
  * @returns {{choices: string[], correctIndex: number} | null} 보기를 2개 이상 못 만들면 null
  */
 function buildChoices(word, dir) {
@@ -58,10 +83,14 @@ function buildChoices(word, dir) {
   const used = new Set([normalizeAnswer(correctText)]);
   const distractors = [];
 
-  for (const other of shuffle(state.words)) {
+  const scored = distractorPool(word)
+    .filter(o => !meaningsOverlap(word, o) && wordKey(o.word) !== wordKey(word.word))
+    .map(o => ({ o, s: spellingSimilarity(word.word, o.word) + Math.random() * 2 }))
+    .sort((a, b) => b.s - a.s);
+  const ordered = scored.map(x => x.o);
+
+  for (const other of ordered) {
     if (distractors.length >= 3) break;
-    if (other.id === word.id || meaningsOverlap(word, other)) continue;
-    if (dir === 'ko2en' && wordKey(other.word) === wordKey(word.word)) continue;
     const text = dir === 'en2ko' ? other.meanings.join(', ') : other.word;
     const key = normalizeAnswer(text);
     if (used.has(key)) continue;
@@ -72,6 +101,12 @@ function buildChoices(word, dir) {
 
   const choices = shuffle([correctText, ...distractors]);
   return { choices, correctIndex: choices.indexOf(correctText) };
+}
+
+/** 형식 결정: 추천 조합이면 영→한은 객관식, 한→영은 주관식 */
+function questionFormat(format, dir) {
+  if (format === 'auto') return dir === 'en2ko' ? 'choice' : 'input';
+  return format;
 }
 
 /** 단어 하나로 문제 하나 만들기 */
@@ -89,7 +124,7 @@ function buildQuestion(word, settings) {
     choices: null,
     correctIndex: -1
   };
-  if (settings.format === 'choice') {
+  if (questionFormat(settings.format, dir) === 'choice') {
     const built = buildChoices(word, dir);
     if (built) { // 단어가 너무 적어 보기를 못 만들면 주관식으로 출제
       q.type = 'choice';
@@ -107,35 +142,182 @@ function normalizeAnswer(text) {
   return String(text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-/** 뜻 비교용 후보: 원문, 괄호 내용 뺀 것, 띄어쓰기 뺀 것 */
+// 영→한 채점에서 떼고 비교하는 끝말 (긴 것부터) — "포기하다" = "포기" = "포기함"
+const KO_ENDINGS = ['적인', '하다', '되다', '함', '기', '한'];
+
+/** 뜻 정리: 소문자, 괄호 내용, "~을/를/에…" 같은 표시, 띄어쓰기 제거 */
+function cleanMeaning(text) {
+  return normalizeAnswer(text)
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, '')
+    .replace(/~\s*(을|를|이|가|은|는|에게|에서|에|와|과|의|으로|로)?/g, '')
+    .replace(/[\s.·]/g, '');
+}
+
+/** 뜻 비교용 후보: 정리한 말 + 끝말을 뗀 말 */
 function meaningVariants(text) {
-  const base = normalizeAnswer(text);
-  const noParen = normalizeAnswer(base.replace(/\([^)]*\)|\[[^\]]*\]/g, ''));
-  return [base, noParen, base.replace(/\s/g, ''), noParen.replace(/\s/g, '')].filter(Boolean);
+  const base = cleanMeaning(text);
+  const out = [base];
+  for (const end of KO_ENDINGS) {
+    if (base.length > end.length && base.endsWith(end)) { out.push(base.slice(0, -end.length)); break; }
+  }
+  return out.filter(Boolean);
 }
 
 /**
- * 주관식 채점
- *  - 영→한: 쉼표로 여러 개 적었으면 하나라도 뜻과 맞으면 정답 (띄어쓰기·괄호 차이는 무시)
+ * 주관식 채점 → { correct, near, note }
+ *  - 영→한: 쉼표로 여러 개 적었으면 하나라도 맞으면 정답
+ *           띄어쓰기·괄호·"~을/를"·끝말(하다/되다/함/기/적인/한) 차이는 무시
+ *           한 글자만 다르면 "거의 정답" (오답이지만 정답 인정 버튼 강조)
  *  - 한→영: 영단어와 같으면 정답 (대소문자·앞뒤 공백 무시)
+ *           철자 1글자 차이는 "1글자 틀림", 내 단어장의 다른 단어면 "다른 단어예요"
  */
 function gradeInput(q, userAnswer) {
   const answer = normalizeAnswer(userAnswer);
-  if (!answer) return false;
-  if (q.dir === 'ko2en') return answer === normalizeAnswer(q.word);
+  if (!answer) return { correct: false };
 
-  const correctSet = new Set(q.meanings.flatMap(meaningVariants));
-  const parts = splitMeanings(answer);
-  return parts.some(p => meaningVariants(p).some(v => correctSet.has(v)));
+  if (q.dir === 'ko2en') {
+    const target = normalizeAnswer(q.word);
+    if (answer === target) return { correct: true };
+    const other = findWord(answer);
+    if (other && other.id !== q.wordId) {
+      const same = meaningsOverlap(other, { meanings: q.meanings });
+      return { correct: false, note: `${same ? '뜻이 같은 ' : ''}다른 단어예요 (뜻: ${other.meanings.join(', ')})` };
+    }
+    if (editDistance(answer, target) === 1) return { correct: false, near: true, note: '1글자 틀림' };
+    return { correct: false };
+  }
+
+  const correctList = [...new Set(q.meanings.flatMap(meaningVariants))];
+  const correctSet = new Set(correctList);
+  const userVariants = splitMeanings(answer).flatMap(meaningVariants);
+  if (userVariants.some(v => correctSet.has(v))) return { correct: true };
+  const near = userVariants.some(v => correctList.some(c => c.length >= 2 && editDistance(v, c) === 1));
+  return near ? { correct: false, near: true, note: '한 글자만 달라요' } : { correct: false };
+}
+
+/* ---------- 진행 중인 시험 저장 (이어서 풀기) ---------- */
+
+/** 지금 시험을 wt.quizRun에 저장 (answers[i]는 questions[i]의 답이라 question은 빼고 저장) */
+function saveQuizRun() {
+  if (!quiz || quiz.phase === 'done') return;
+  writeJSON(STORAGE_KEYS.quizRun, {
+    questions: quiz.questions,
+    index: quiz.index,
+    answers: quiz.answers.map(({ question, ...rest }) => rest),
+    scope: quiz.scope,
+    scopeName: quiz.scopeName,
+    settings: quiz.settings,
+    startedAt: quiz.startedAt,
+    retry: !!quiz.retry
+  });
+}
+
+function clearQuizRun() {
+  try { localStorage.removeItem(STORAGE_KEYS.quizRun); } catch (e) { /* 무시 */ }
+}
+
+/** 저장된 시험 불러오기 (형식이 이상하면 null) */
+function loadQuizRun() {
+  const r = readJSON(STORAGE_KEYS.quizRun, null);
+  if (!r || !Array.isArray(r.questions) || !r.questions.length || !Array.isArray(r.answers)) return null;
+  if (r.answers.length > r.questions.length) return null;
+  return r;
+}
+
+/** 저장된 시험 이어서 풀기 */
+function resumeQuiz() {
+  const r = loadQuizRun();
+  if (!r) { renderTestSetup(); return; }
+  quiz = {
+    questions: r.questions,
+    answers: r.answers.map((a, i) => ({ ...a, question: r.questions[i] })),
+    index: r.answers.length, // 채점까지 끝난 문제 다음부터
+    phase: 'answer',
+    gradedAt: 0,
+    scope: r.scope || ['all'],
+    scopeName: r.scopeName || '',
+    settings: r.settings || { ...state.settings },
+    startedAt: r.startedAt || Date.now(),
+    retry: !!r.retry
+  };
+  if (quiz.index >= quiz.questions.length) { finishTest(); return; }
+  showTestPanel('run');
+  renderQuestion();
 }
 
 /* ---------- 테스트 진행 ---------- */
 
-/** 테스트 시작. targetWords를 주면 그 단어들만 출제 (틀린 것만 다시 풀기) */
-function startTest(targetWords = null) {
-  const s = state.settings;
-  const pool = libraryWords(s.testLibrary); // 출제 범위(라이브러리)의 단어
-  if (!targetWords && pool.length === 0) {
+/** 출제 범위의 단어 (여러 라이브러리면 합치고 중복은 한 번만) */
+function scopeWords(scope) {
+  const seen = new Set();
+  const out = [];
+  scope.forEach(id => libraryWords(id).forEach(w => { if (!seen.has(w.id)) { seen.add(w.id); out.push(w); } }));
+  return out;
+}
+
+function scopeLabel(scope) {
+  return scope.map(libraryName).join(' + ');
+}
+
+/** 지금 설정의 출제 범위 (없어진 라이브러리는 빼고, 비면 '모든 단어') */
+function currentScope() {
+  const scope = (state.settings.testScope || []).filter(libraryExists);
+  return scope.length ? scope : ['all'];
+}
+
+const TEST_SETTING_KEYS = ['direction', 'format', 'mode', 'count'];
+
+/** 이 범위의 시험 설정: 라이브러리 하나면 그 라이브러리의 마지막 설정, 아니면 지금 설정 */
+function settingsForScope(scope) {
+  const base = {};
+  TEST_SETTING_KEYS.forEach(k => { base[k] = state.settings[k]; });
+  const saved = scope.length === 1 ? state.settings.scopeSettings[scope[0]] : null;
+  return saved ? { ...base, ...saved } : base;
+}
+
+/** 시험을 시작할 때 범위마다 마지막 설정 기억 */
+function rememberScopeSettings(scope, settings) {
+  const s = {};
+  TEST_SETTING_KEYS.forEach(k => { s[k] = settings[k]; });
+  scope.forEach(id => { state.settings.scopeSettings[id] = s; });
+  saveSettings();
+}
+
+/** 풀던 시험이 있으면 버릴지 물어봄. 계속 진행해도 되면 true */
+async function confirmDiscardRun() {
+  const inMemory = quiz && (quiz.phase === 'answer' || quiz.phase === 'feedback');
+  const run = loadQuizRun();
+  if (!inMemory && !run) return true;
+  const done = inMemory ? quiz.answers.length : run.answers.length;
+  const total = inMemory ? quiz.questions.length : run.questions.length;
+  const ok = await confirmDialog('풀던 시험이 있어요', `풀던 시험(${done}/${total})을 버리고 새로 시작할까요?\n(풀던 기록은 반영되지 않습니다)`, '새로 시작');
+  if (!ok) return false;
+  quiz = null;
+  clearQuizRun();
+  return true;
+}
+
+/** ▶ 버튼: 이 범위(라이브러리)의 마지막 설정으로 바로 시작 */
+async function startScopeTest(scope) {
+  scope = scope.filter(libraryExists);
+  if (!scope.length) scope = ['all'];
+  if (!scopeWords(scope).length) { showToast('출제할 단어가 없습니다.'); return; }
+  if (!(await confirmDiscardRun())) return;
+  const settings = settingsForScope(scope);
+  switchTab('test');
+  startTest(null, { scope, settings });
+}
+
+/**
+ * 테스트 시작
+ * @param {Array} targetWords 주면 그 단어들만 출제 (틀린 것만 다시 풀기 등)
+ * @param {object} opts { scope, scopeName, settings }
+ */
+function startTest(targetWords = null, opts = {}) {
+  const s = { ...state.settings, ...(opts.settings || {}) };
+  const scope = opts.scope || currentScope();
+  const pool = targetWords || scopeWords(scope);
+  if (pool.length === 0) {
     showToast('출제할 단어가 없습니다. 먼저 단어를 등록하세요.');
     return;
   }
@@ -143,7 +325,7 @@ function startTest(targetWords = null) {
   if (targetWords) {
     picked = shuffle(targetWords);
   } else {
-    const n = Math.min(s.count, pool.length);
+    const n = s.count > 0 ? Math.min(s.count, pool.length) : pool.length;
     picked = s.mode === 'weighted' ? pickWeighted(pool, n) : pickRandom(pool, n);
   }
 
@@ -152,8 +334,15 @@ function startTest(targetWords = null) {
     index: 0,
     answers: [],
     phase: 'answer',
-    gradedAt: 0
+    gradedAt: 0,
+    scope,
+    scopeName: opts.scopeName || scopeLabel(scope),
+    settings: { direction: s.direction, format: s.format, mode: s.mode, count: s.count },
+    startedAt: Date.now(),
+    retry: !!targetWords
   };
+  if (!targetWords) rememberScopeSettings(scope, quiz.settings);
+  saveQuizRun();
   showTestPanel('run');
   renderQuestion();
 }
@@ -224,7 +413,7 @@ function handleInputSubmit(e) {
   const q = currentQuestion();
   const userAnswer = $('#quiz-answer').value.trim();
   // 빈 칸으로 제출하면 "모름"으로 보고 오답 처리
-  recordAnswer(q, userAnswer, userAnswer ? gradeInput(q, userAnswer) : false);
+  recordAnswer(q, userAnswer, gradeInput(q, userAnswer));
 }
 
 /** 객관식 보기 선택 */
@@ -232,29 +421,35 @@ function handleChoice(index) {
   if (!quiz || quiz.phase !== 'answer') return;
   const q = currentQuestion();
   if (q.type !== 'choice' || index < 0 || index >= q.choices.length) return;
-  recordAnswer(q, q.choices[index], index === q.correctIndex, index);
+  recordAnswer(q, q.choices[index], { correct: index === q.correctIndex }, index);
 }
 
 /** 답 기록 후 채점 결과 보여주기 */
-function recordAnswer(q, userAnswer, correct, choiceIndex = -1) {
-  quiz.answers.push({ question: q, userAnswer, correct, accepted: false });
+function recordAnswer(q, userAnswer, result, choiceIndex = -1) {
+  quiz.answers.push({ question: q, userAnswer, correct: !!result.correct, near: !!result.near, note: result.note || '', accepted: false, choiceIndex });
   quiz.phase = 'feedback';
   quiz.gradedAt = Date.now();
-  showFeedback(q, correct, choiceIndex);
+  saveQuizRun();
+  showFeedback(q, quiz.answers[quiz.answers.length - 1]);
 }
 
-/** 채점 직후 정답 표시 */
-function showFeedback(q, correct, choiceIndex) {
+/** 채점 직후 정답 표시 (거의 정답이면 "정답 인정" 버튼 강조) */
+function showFeedback(q, ans) {
   const title = $('#quiz-feedback-title');
-  title.textContent = correct ? '⭕ 정답!' : '❌ 오답';
-  title.className = 'feedback-title ' + (correct ? 'ok' : 'bad');
+  title.textContent = ans.correct ? (ans.accepted ? '⭕ 정답 인정' : '⭕ 정답!') : (ans.near ? '🟡 거의 정답' : '❌ 오답');
+  title.className = 'feedback-title ' + (ans.correct ? 'ok' : ans.near ? 'near' : 'bad');
+  $('#quiz-feedback-note').textContent = ans.correct ? '' : ans.note;
+  $('#quiz-feedback-note').hidden = ans.correct || !ans.note;
   $('#quiz-feedback-answer').textContent = q.dir === 'en2ko'
     ? `정답: ${q.meanings.join(', ')}`
     : `정답: ${q.word}  (${q.meanings.join(', ')})`;
   $('#quiz-feedback-memo').textContent = q.memo || '';
   $('#quiz-feedback-memo').hidden = !q.memo;
-  // 주관식 오답일 때만 "정답 인정" 버튼 표시
-  $('#quiz-accept-btn').hidden = correct || q.type !== 'input';
+  // 주관식 오답일 때만 "정답 인정" 버튼 표시, 거의 정답이면 강조
+  const accept = $('#quiz-accept-btn');
+  accept.hidden = ans.correct || q.type !== 'input';
+  accept.classList.toggle('btn-primary', !!ans.near && !ans.correct);
+  $('#quiz-next-btn').classList.toggle('btn-primary', !(ans.near && !ans.correct));
   $('#quiz-next-btn').textContent = quiz.index + 1 >= quiz.questions.length ? '결과 보기 (Enter)' : '다음 (Enter)';
   $('#quiz-speak-btn').hidden = false;
   $('#quiz-feedback').hidden = false;
@@ -262,13 +457,13 @@ function showFeedback(q, correct, choiceIndex) {
   if (q.type === 'input') {
     const input = $('#quiz-answer');
     input.readOnly = true; // 포커스는 유지해서 키보드 Enter로 바로 다음 문제로
-    input.className = 'quiz-answer ' + (correct ? 'correct' : 'wrong');
+    input.className = 'quiz-answer ' + (ans.correct ? 'correct' : 'wrong');
     $('#quiz-submit-btn').hidden = true;
   } else {
     $$('#quiz-choices .choice').forEach((btn, i) => {
       btn.disabled = true;
       if (i === q.correctIndex) btn.classList.add('correct');
-      else if (i === choiceIndex) btn.classList.add('wrong');
+      else if (i === ans.choiceIndex) btn.classList.add('wrong');
     });
   }
 }
@@ -279,11 +474,8 @@ function acceptAnswer() {
   if (!last || last.correct) return;
   last.correct = true;
   last.accepted = true;
-  const title = $('#quiz-feedback-title');
-  title.textContent = '⭕ 정답 인정';
-  title.className = 'feedback-title ok';
-  $('#quiz-answer').className = 'quiz-answer correct';
-  $('#quiz-accept-btn').hidden = true;
+  saveQuizRun();
+  showFeedback(last.question, last);
   // 키보드 Enter로 계속 진행할 수 있게 입력칸에 포커스 복귀
   $('#quiz-answer').focus();
 }
@@ -295,6 +487,7 @@ function nextQuestion() {
     return;
   }
   quiz.index++;
+  saveQuizRun();
   renderQuestion();
 }
 
@@ -319,11 +512,11 @@ async function quitTest() {
         ]
   });
   if (choice === 'finish') finishTest();
-  else if (choice === 'discard') { quiz = null; showTestPanel('setup'); }
+  else if (choice === 'discard') { quiz = null; clearQuizRun(); showTestPanel('setup'); }
   else if (quiz.phase === 'answer' && currentQuestion().type === 'input') $('#quiz-answer').focus();
 }
 
-/** 결과를 단어별 통계에 반영 */
+/** 결과를 단어별 통계에 반영 (출제·오답 횟수, 최근 결과, 다음 복습일, 날짜별 학습량) */
 function commitResults(answers) {
   const now = Date.now();
   answers.forEach(a => {
@@ -332,14 +525,19 @@ function commitResults(answers) {
     w.asked++;
     if (!a.correct) w.wrong++;
     w.lastTested = now;
+    recordWordResult(w, a.correct, now);
+    scheduleReview(w, a.correct, now);
   });
   saveWords();
+  recordDaily(answers.length, answers.filter(a => a.correct).length, now);
 }
 
-/** 테스트 종료 → 통계 반영 + 결과 화면 */
+/** 테스트 종료 → 통계 반영 + 기록 저장 + 결과 화면 */
 function finishTest() {
   const answers = quiz.answers;
   commitResults(answers);
+  addHistoryFromQuiz(quiz);
+  clearQuizRun();
   $('#quiz-answer').blur();
 
   const total = answers.length;
@@ -348,56 +546,141 @@ function finishTest() {
   const pct = total ? Math.round((correct / total) * 100) : 0;
   $('#result-score').textContent = `${correct} / ${total}  (${pct}점)`;
 
+  // 틀린 단어: 내 답 vs 정답, 🔊, 메모
   $('#result-wrong-body').innerHTML = wrong.map(a => `
     <tr>
       <td>${escapeHtml(a.question.prompt)}</td>
       <td class="mine">${escapeHtml(a.userAnswer || '(무응답)')}</td>
-      <td class="answer">${escapeHtml(a.question.answerText)}</td>
+      <td class="answer">${escapeHtml(a.question.answerText)}
+        ${a.question.memo ? `<small class="result-memo">${escapeHtml(a.question.memo)}</small>` : ''}</td>
+      <td class="speak-cell"><button class="icon-btn" data-speak="${escapeHtml(a.question.word)}" aria-label="${escapeHtml(a.question.word)} 발음 듣기">🔊</button></td>
     </tr>`).join('');
   $('#result-wrong-wrap').hidden = wrong.length === 0;
   $('#result-perfect').hidden = wrong.length > 0 || total === 0;
   $('#retry-wrong-btn').hidden = wrong.length === 0;
 
-  // "틀린 것만 다시 풀기"용으로 틀린 단어 ID 보관
+  // "틀린 것만 다시 풀기", "오답 노트", "외움 표시"용 단어 ID
   quiz.lastWrongIds = [...new Set(wrong.map(a => a.question.wordId))];
+  quiz.lastCorrectIds = [...new Set(answers.filter(a => a.correct).map(a => a.question.wordId))].filter(id => !quiz.lastWrongIds.includes(id));
+  const noteBtn = $('#wrong-note-btn');
+  noteBtn.hidden = wrong.length === 0;
+  noteBtn.disabled = false;
+  noteBtn.textContent = `틀린 단어 ${quiz.lastWrongIds.length}개를 '${WRONG_NOTE_NAME}'에 담기`;
+  const knownBtn = $('#mark-known-btn');
+  knownBtn.hidden = quiz.lastCorrectIds.length === 0;
+  knownBtn.disabled = false;
+  knownBtn.textContent = `맞힌 단어 ${quiz.lastCorrectIds.length}개 외움으로 표시`;
   quiz.phase = 'done';
   showTestPanel('result');
+}
+
+const WRONG_NOTE_NAME = '오답 노트';
+
+/** 틀린 단어를 '오답 노트'에 담기 (없으면 만듦) */
+function addWrongToNote() {
+  if (!quiz || !quiz.lastWrongIds) return;
+  const ids = quiz.lastWrongIds.filter(id => getWordById(id));
+  const lib = state.libraries.find(l => l.name === WRONG_NOTE_NAME) ||
+    createLibrary({ name: WRONG_NOTE_NAME, desc: '시험에서 틀린 단어', color: 7 });
+  const added = addWordsToLibrary(lib.id, ids);
+  touchLibrary(lib.id);
+  $('#wrong-note-btn').disabled = true;
+  showToast(added ? `${WRONG_NOTE_NAME}에 ${added}개 담음` : `이미 ${WRONG_NOTE_NAME}에 있어요`, 4000,
+    { label: '열기', onClick: () => { switchTab('list'); openLibrary(lib.id); } });
+}
+
+/** 맞힌 단어를 '외움'으로 표시 */
+function markCorrectKnown() {
+  if (!quiz || !quiz.lastCorrectIds) return;
+  setMarkedKnown(quiz.lastCorrectIds, true);
+  $('#mark-known-btn').disabled = true;
+  showToast(`${quiz.lastCorrectIds.length}개를 외움으로 표시했습니다.`);
 }
 
 function retryWrong() {
   if (!quiz || !quiz.lastWrongIds) return;
   const words = quiz.lastWrongIds.map(getWordById).filter(Boolean);
   if (words.length === 0) { showToast('다시 풀 단어가 없습니다.'); return; }
-  startTest(words);
+  startTest(words, { scope: quiz.scope, scopeName: `${quiz.scopeName} · 틀린 것만`, settings: quiz.settings });
 }
 
 /* ---------- 테스트 설정 화면 ---------- */
 
-/** 세그먼트 버튼에 현재 설정 표시 + 출제 개수 안내 */
+/** 출제 범위 목록: 이름 / 단어 수 / 복습 필요 개수 / 마지막 점수 + ▶ */
+function renderScopeList() {
+  const scope = currentScope();
+  const ids = ['all', ...state.libraries.map(l => l.id), ...AUTO_LISTS.map(a => a.id)];
+  $('#scope-list').innerHTML = ids.map(id => {
+    const words = libraryWords(id);
+    if (isAutoList(id) && !words.length && !scope.includes(id)) return ''; // 빈 자동 목록은 숨김
+    const last = lastHistory(id);
+    const review = words.filter(w => needsReview(w)).length;
+    const checked = scope.includes(id);
+    return `
+      <li class="scope-row${checked ? ' checked' : ''}${isAutoList(id) ? ' auto' : ''}">
+        <label class="scope-check">
+          <input type="checkbox" value="${id}" ${checked ? 'checked' : ''}>
+          <span class="scope-name">${escapeHtml(libraryName(id))}</span>
+        </label>
+        <span class="scope-meta">단어 ${words.length}${review ? ` · <b class="due">복습 ${review}</b>` : ''}${last ? ` · 마지막 ${scoreText(last)}` : ''}</span>
+        <button type="button" class="icon-btn play-btn" data-play="${id}" aria-label="${escapeHtml(libraryName(id))} 바로 시작" ${words.length ? '' : 'disabled'}>▶</button>
+      </li>`;
+  }).join('');
+}
+
+/** 범위 체크 상자를 바꿨을 때: 하나만 고르면 그 라이브러리의 마지막 설정을 불러옴 */
+function handleScopeChange() {
+  const checked = $$('#scope-list input:checked').map(i => i.value);
+  state.settings.testScope = checked.length ? checked : ['all'];
+  state.settings.testLibrary = state.settings.testScope[0];
+  if (state.settings.testScope.length === 1) {
+    Object.assign(state.settings, settingsForScope(state.settings.testScope));
+  }
+  saveSettings();
+  renderTestSetup();
+}
+
+/** 세그먼트 버튼에 현재 설정 표시 + 출제 개수 안내 + 이어서 풀기 */
 function renderTestSetup() {
   $$('#test-setup .segmented').forEach(seg => {
     const key = seg.dataset.setting;
-    seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.value === state.settings[key]));
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.value === String(state.settings[key])));
   });
-  // 삭제된 라이브러리가 선택돼 있으면 '모든 단어'로
-  if (state.settings.testLibrary !== 'all' && !getLibrary(state.settings.testLibrary)) {
-    state.settings.testLibrary = 'all';
-    saveSettings();
-  }
-  fillLibrarySelect($('#test-library'), { selected: state.settings.testLibrary, includeAll: true });
+  renderScopeList();
+  renderTodayCard();
 
-  const total = libraryWords(state.settings.testLibrary).length;
-  const n = Math.min(state.settings.count, total);
+  const scope = currentScope();
+  const total = scopeWords(scope).length;
+  const count = state.settings.count;
+  const n = count > 0 ? Math.min(count, total) : total;
   let info = total === 0
     ? '출제할 단어가 없습니다. 단어를 등록하거나 다른 범위를 고르세요.'
-    : `${libraryName(state.settings.testLibrary)} ${total}개 중 ${n}문제 출제 (출제 개수는 ‘설정’ 탭에서 변경)`;
-  if (state.settings.format === 'choice' && total > 0 && state.words.length < 4) info += '\n※ 단어가 4개 미만이면 객관식 보기 수가 줄어듭니다.';
+    : `${scopeLabel(scope)} ${total}개 중 ${n}문제 출제${scope.length > 1 ? ' (겹치는 단어는 한 번만)' : ''}`;
+  if (count > 0 && total > 0 && total < count) info += ' (단어가 적어 전부 출제)';
+  if (state.settings.format === 'auto') info += '\n추천 조합: 영→한은 객관식, 한→영은 주관식으로 나옵니다.';
+  if (state.settings.format !== 'input' && total > 0 && state.words.length < 4) info += '\n※ 단어가 4개 미만이면 객관식 보기 수가 줄어듭니다.';
   $('#test-count-info').textContent = info;
   $('#start-test-btn').disabled = total === 0;
+
+  // 이어서 풀기
+  const run = !quiz || quiz.phase === 'done' ? loadQuizRun() : null;
+  $('#resume-box').hidden = !run;
+  if (run) {
+    const done = run.answers.length;
+    $('#resume-btn').textContent = `이어서 풀기 (${done}/${run.questions.length})`;
+    $('#resume-info').textContent = `${run.scopeName || '시험'} · ${formatDate(run.startedAt)}`;
+  }
+}
+
+/** 새 시험 시작 버튼: 저장된 시험이 있으면 버릴지 확인 */
+async function handleStartClick() {
+  if (!(await confirmDiscardRun())) return;
+  startTest(null, { scope: currentScope() });
 }
 
 /** 테스트 탭에 들어올 때: 진행 중이 아니면 설정 화면 갱신 */
 function onEnterTestView() {
+  renderTodayCard();
   const inProgress = quiz && (quiz.phase === 'answer' || quiz.phase === 'feedback');
   if (inProgress) {
     if (quiz.phase === 'answer' && currentQuestion().type === 'input') $('#quiz-answer').focus();
@@ -407,23 +690,33 @@ function onEnterTestView() {
 }
 
 function initTestView() {
-  // 출제 방향/형식/모드 선택 → 설정에 저장
+  // 출제 방향/형식/모드/개수 선택 → 설정에 저장 (마지막 선택 기억)
   $$('#test-setup .segmented').forEach(seg => {
     seg.addEventListener('click', e => {
       const btn = e.target.closest('button[data-value]');
       if (!btn) return;
-      state.settings[seg.dataset.setting] = btn.dataset.value;
+      const key = seg.dataset.setting;
+      state.settings[key] = key === 'count' ? Number(btn.dataset.value) : btn.dataset.value;
+      // 범위가 라이브러리 하나면 그 라이브러리의 설정으로도 기억
+      const scope = currentScope();
+      if (scope.length === 1) rememberScopeSettings(scope, state.settings);
       saveSettings();
       renderTestSetup();
     });
   });
 
-  $('#test-library').addEventListener('change', e => {
-    state.settings.testLibrary = e.target.value;
-    saveSettings();
+  $('#scope-list').addEventListener('change', handleScopeChange);
+  $('#scope-list').addEventListener('click', e => {
+    const b = e.target.closest('[data-play]');
+    if (b) startScopeTest([b.dataset.play]);
+  });
+  $('#start-test-btn').addEventListener('click', handleStartClick);
+  $('#resume-btn').addEventListener('click', resumeQuiz);
+  $('#resume-discard-btn').addEventListener('click', async () => {
+    if (!(await confirmDialog('풀던 시험 버리기', '풀던 시험을 버릴까요? (기록은 반영되지 않습니다)', '버리기', true))) return;
+    clearQuizRun();
     renderTestSetup();
   });
-  $('#start-test-btn').addEventListener('click', () => startTest());
   $('#quiz-input-form').addEventListener('submit', handleInputSubmit);
   $('#quiz-choices').addEventListener('click', e => {
     const btn = e.target.closest('.choice');
@@ -435,6 +728,12 @@ function initTestView() {
   $('#quit-test-btn').addEventListener('click', quitTest);
   $('#retry-wrong-btn').addEventListener('click', retryWrong);
   $('#new-test-btn').addEventListener('click', () => { quiz = null; showTestPanel('setup'); });
+  $('#wrong-note-btn').addEventListener('click', addWrongToNote);
+  $('#mark-known-btn').addEventListener('click', markCorrectKnown);
+  $('#result-wrong-body').addEventListener('click', e => {
+    const b = e.target.closest('[data-speak]');
+    if (b) speak(b.dataset.speak);
+  });
 
   // 객관식: 숫자키 1~4로 선택, Enter로 다음 문제 (외장 키보드용)
   document.addEventListener('keydown', e => {

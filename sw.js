@@ -3,7 +3,7 @@
  *  - 파일을 수정해서 다시 배포할 때는 CACHE_VERSION 숫자를 올려 주세요.
  * ============================================================ */
 
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `wordbook-${CACHE_VERSION}`;
 
 // 오프라인에서 필요한 모든 파일 (상대 경로라 GitHub Pages 하위 폴더에서도 동작)
@@ -17,9 +17,17 @@ const APP_FILES = [
   './js/speech.js',
   './js/samples.js',
   './js/packs.js',
+  './js/dict-data.js',
+  './js/dict.js',
   './js/libraries.js',
   './js/words.js',
+  './js/review.js',
+  './js/history.js',
+  './js/recommend.js',
+  './js/cards.js',
+  './js/stats.js',
   './js/list.js',
+  './js/register.js',
   './js/quiz.js',
   './js/backup.js',
   './js/app.js',
@@ -30,12 +38,14 @@ const APP_FILES = [
 ];
 
 // 설치: 앱 파일 미리 캐시
+//  - 이미 쓰던 버전이 있으면 바로 바꾸지 않고 기다림 → 앱에서 "지금 적용"을 누르면 교체
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_FILES))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_FILES)));
+});
+
+// 앱에서 "지금 적용"을 누르면 기다리던 새 버전으로 교체
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // 활성화: 예전 버전 캐시 삭제

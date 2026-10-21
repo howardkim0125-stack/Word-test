@@ -25,9 +25,18 @@
       <button class="tab" data-tab="add" role="tab">단어 등록</button>
       <button class="tab" data-tab="list" role="tab">라이브러리</button>
       <button class="tab" data-tab="test" role="tab">테스트</button>
+      <button class="tab" data-tab="stats" role="tab">통계</button>
       <button class="tab" data-tab="settings" role="tab">설정</button>
     </nav>
   </header>
+
+  <!-- 새 버전 알림 배너 -->
+  <div id="update-banner" class="banner banner-info" hidden>
+    <span>새 버전이 있어요.</span>
+    <div class="banner-actions">
+      <button class="btn btn-small btn-primary" id="update-apply-btn">지금 적용</button>
+    </div>
+  </div>
 
   <!-- 백업 알림 배너 -->
   <div id="backup-banner" class="banner" hidden>
@@ -50,15 +59,24 @@
       <div class="card">
         <h2>단어 하나 등록</h2>
         <form id="add-form" autocomplete="off">
-          <label class="field">
-            <span>영단어 <em class="req">*</em></span>
-            <input type="text" id="add-word" required
-                   autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="next">
-          </label>
-          <label class="field">
-            <span>뜻 <em class="req">*</em> <small>(여러 개면 쉼표로 구분)</small></span>
-            <input type="text" id="add-meaning" required placeholder="예: 사과, 사과나무" enterkeyhint="next">
-          </label>
+          <div class="field">
+            <span>영단어 <em class="req">*</em> <small>(입력하면 사전에서 찾아 뜻을 채워요)</small></span>
+            <div class="ac-wrap">
+              <input type="text" id="add-word" placeholder="예: abandon"
+                     autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off" enterkeyhint="done"
+                     role="combobox" aria-autocomplete="list" aria-controls="ac-list" aria-expanded="false">
+              <ul id="ac-list" class="ac-list" role="listbox" hidden></ul>
+            </div>
+            <p id="add-word-status" class="word-status" hidden></p>
+          </div>
+          <div id="dict-fallback" class="dict-fallback" hidden></div>
+          <div class="field">
+            <span>뜻 <em class="req">*</em> <small>(Enter나 쉼표로 추가 · 칩을 누르면 빠져요)</small></span>
+            <div class="chip-input" id="meaning-box">
+              <div id="meaning-chips" class="meaning-chips"></div>
+              <input type="text" id="add-meaning" placeholder="뜻 입력 후 Enter (쉼표로 여러 개)" enterkeyhint="done" autocomplete="off">
+            </div>
+          </div>
           <label class="field">
             <span>메모 / 예문 <small>(선택)</small></span>
             <textarea id="add-memo" rows="2" placeholder="예: An apple a day keeps the doctor away."></textarea>
@@ -69,11 +87,17 @@
 
       <div class="card">
         <h2>일괄 등록</h2>
-        <p class="hint">한 줄에 하나씩 <code>word - 뜻</code> 형식으로 붙여 넣으세요. 뜻이 여러 개면 쉼표로 구분합니다.</p>
+        <p class="hint">한 줄에 하나씩 <code>word - 뜻</code> 형식으로 붙여 넣으세요. 뜻이 여러 개면 쉼표로 구분합니다.
+          <b>영단어만</b> 적은 줄은 사전에서 뜻을 채워요.</p>
         <textarea id="bulk-input" rows="8"
                   autocapitalize="off" autocorrect="off" spellcheck="false"
-                  placeholder="apple - 사과&#10;run - 달리다, 운영하다&#10;well-known - 잘 알려진"></textarea>
+                  placeholder="apple - 사과&#10;run - 달리다, 운영하다&#10;well-known - 잘 알려진&#10;abandon"></textarea>
         <button class="btn btn-primary btn-block" id="bulk-add-btn">일괄 등록</button>
+      </div>
+
+      <div class="card recent-card" id="recent-card" hidden>
+        <h2>방금 등록한 단어</h2>
+        <ul class="recent-list" id="recent-adds"></ul>
       </div>
     </section>
 
@@ -86,6 +110,12 @@
           <button class="btn btn-small btn-primary" id="new-lib-btn">＋ 새 라이브러리</button>
         </div>
         <div class="lib-grid" id="lib-grid"></div>
+
+        <div class="section-head">
+          <h2>자동 목록</h2>
+        </div>
+        <p class="hint">시험 기록으로 항상 새로 계산돼요. 눌러서 보고 ▶ 테스트할 수 있어요.</p>
+        <div class="lib-grid" id="auto-grid"></div>
 
         <div class="section-head">
           <h2>수능·모의고사 빈출 단어팩</h2>
@@ -103,8 +133,12 @@
             <p class="lib-kind" id="lib-hero-kind"></p>
             <h2 class="lib-hero-name" id="lib-hero-name"></h2>
             <p class="hint" id="lib-hero-desc"></p>
+            <div class="lib-hero-progress" id="lib-hero-progress"></div>
+            <p class="lib-hero-last"><span id="lib-hero-last"></span>
+              <button class="btn btn-small" id="lib-history-btn">시험 기록</button></p>
             <div class="btn-row lib-hero-actions">
               <button class="btn btn-primary" id="lib-test-btn">▶ 테스트</button>
+              <button class="btn" id="lib-cards-btn">▶ 암기</button>
               <button class="btn" id="lib-add-words-btn">＋ 단어 추가</button>
               <button class="btn" id="lib-edit-btn">편집</button>
               <button class="btn btn-danger" id="lib-delete-btn">삭제</button>
@@ -121,10 +155,44 @@
             <option value="accuracy">정답률 낮은순</option>
             <option value="wrong">오답 많은순</option>
           </select>
+          <select id="list-mastery" aria-label="숙련도">
+            <option value="">숙련도 전체</option>
+            <option value="new">새 단어</option>
+            <option value="learning">학습 중</option>
+            <option value="known">외움</option>
+          </select>
+          <button class="btn" id="select-mode-btn">선택</button>
+        </div>
+        <div class="select-tools" id="select-tools" hidden>
+          <button class="btn btn-small" id="sel-all">전체 선택</button>
+          <button class="btn btn-small" id="sel-none">해제</button>
+          <button class="btn btn-small" id="sel-known">외운 단어만 선택</button>
+          <button class="btn btn-small btn-primary" id="sel-done">완료</button>
         </div>
         <p class="list-count" id="list-count"></p>
         <ul class="word-list" id="word-list"></ul>
         <p class="empty" id="list-empty" hidden></p>
+
+        <!-- 추천 단어 -->
+        <div class="card rec-section" id="rec-section" hidden>
+          <div class="section-head">
+            <h2>추천 단어</h2>
+            <button class="btn btn-small" id="rec-refresh-btn">새로 고침</button>
+          </div>
+          <p class="hint">같은 단어팩, 최근 틀린 단어, 어근이 비슷한 단어에서 골랐어요. ＋ 바로 추가 · ✕ 다시 추천 안 함</p>
+          <ul class="rec-list" id="rec-list"></ul>
+          <p class="hint" id="rec-empty" hidden>지금은 추천할 단어가 없어요.</p>
+        </div>
+
+        <!-- 편집 모드 하단 고정 바 -->
+        <div class="select-bar" id="select-bar" hidden>
+          <span class="select-count" id="select-count">0개 선택</span>
+          <div class="select-actions">
+            <button class="btn" id="sel-add">라이브러리에 담기</button>
+            <button class="btn" id="sel-remove">빼기</button>
+            <button class="btn btn-danger" id="sel-delete">삭제</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -132,11 +200,26 @@
     <section class="view" id="view-test" hidden>
       <!-- 1) 테스트 설정 화면 -->
       <div id="test-setup" class="card">
+        <!-- 오늘: 복습할 단어, 연속 학습일, 하루 목표 -->
+        <div class="today-card" id="today-card">
+          <div class="today-item"><span>오늘 복습할 단어</span><b id="today-due">0개</b></div>
+          <div class="today-item"><span>연속 학습</span><b id="today-streak">0일</b></div>
+          <div class="today-item goal" id="today-goal-item"><span>오늘 목표</span><b id="today-goal">0 / 20</b>
+            <span class="goal-bar"><span id="today-goal-bar"></span></span></div>
+          <button class="btn btn-primary" id="today-review-btn">▶ 오늘 복습</button>
+        </div>
+        <div id="resume-box" class="resume-box" hidden>
+          <div class="resume-text"><b>풀던 시험이 있어요</b><span class="hint" id="resume-info"></span></div>
+          <div class="resume-actions">
+            <button class="btn" id="resume-discard-btn">버리기</button>
+            <button class="btn btn-primary" id="resume-btn">이어서 풀기</button>
+          </div>
+        </div>
         <h2>테스트 설정</h2>
 
         <div class="option-group">
-          <span class="option-label">출제 범위</span>
-          <select id="test-library" aria-label="출제 범위"></select>
+          <span class="option-label">출제 범위 <small class="hint-inline">(여러 개 고르면 합쳐서 출제 · ▶ 바로 시작)</small></span>
+          <ul class="scope-list" id="scope-list"></ul>
         </div>
 
         <div class="option-group">
@@ -152,7 +235,18 @@
           <span class="option-label">형식</span>
           <div class="segmented" data-setting="format">
             <button data-value="input">주관식</button>
-            <button data-value="choice">객관식 4지선다</button>
+            <button data-value="choice">객관식</button>
+            <button data-value="auto">추천 조합</button>
+          </div>
+        </div>
+
+        <div class="option-group">
+          <span class="option-label">출제 개수</span>
+          <div class="segmented" data-setting="count">
+            <button data-value="10">10</button>
+            <button data-value="20">20</button>
+            <button data-value="30">30</button>
+            <button data-value="0">전체</button>
           </div>
         </div>
 
@@ -196,6 +290,7 @@
         <!-- 채점 결과 -->
         <div id="quiz-feedback" class="quiz-feedback" hidden>
           <p id="quiz-feedback-title" class="feedback-title"></p>
+          <p id="quiz-feedback-note" class="feedback-note" hidden></p>
           <p id="quiz-feedback-answer" class="feedback-answer"></p>
           <p id="quiz-feedback-memo" class="feedback-memo"></p>
           <div class="feedback-actions">
@@ -213,12 +308,16 @@
           <h3>틀린 단어</h3>
           <div class="table-wrap">
             <table class="result-table">
-              <thead><tr><th>문제</th><th>내 답</th><th>정답</th></tr></thead>
+              <thead><tr><th>문제</th><th>내 답</th><th>정답</th><th><span class="sr-only">발음</span></th></tr></thead>
               <tbody id="result-wrong-body"></tbody>
             </table>
           </div>
         </div>
         <p class="hint" id="result-perfect" hidden>🎉 모두 맞혔어요!</p>
+        <div class="result-actions result-sub-actions">
+          <button class="btn" id="wrong-note-btn">틀린 단어를 '오답 노트'에 담기</button>
+          <button class="btn" id="mark-known-btn">맞힌 단어 외움으로 표시</button>
+        </div>
         <div class="result-actions">
           <button class="btn btn-primary btn-large" id="retry-wrong-btn">틀린 것만 다시 풀기</button>
           <button class="btn btn-large" id="new-test-btn">새 테스트</button>
@@ -226,17 +325,51 @@
       </div>
     </section>
 
+    <!-- ===================== 통계 ===================== -->
+    <section class="view" id="view-stats" hidden>
+      <div class="stats-summary" id="stats-summary"></div>
+      <div class="card">
+        <h2>최근 14일</h2>
+        <p class="hint">막대: 푼 문제 수 · 점과 선: 정답률 · 점선: 하루 목표</p>
+        <div id="stats-chart"></div>
+        <p class="hint" id="stats-chart-sub"></p>
+      </div>
+      <div class="stats-grid">
+        <div class="card">
+          <div class="section-head">
+            <h2>많이 틀린 단어 TOP 10</h2>
+            <button class="btn btn-small" id="stats-top-test">▶ 시험</button>
+          </div>
+          <ol class="top-list" id="stats-top"></ol>
+        </div>
+        <div class="card">
+          <h2>숙련도 비율</h2>
+          <div class="stats-mastery" id="stats-mastery"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===================== 설정 ===================== -->
     <section class="view" id="view-settings" hidden>
       <div class="card">
-        <h2>테스트</h2>
+        <h2>라이브러리</h2>
         <label class="field">
-          <span>출제 개수 <small>(저장된 단어가 더 적으면 전부 출제)</small></span>
-          <div class="stepper">
-            <button class="btn" data-step="-5">−5</button>
-            <input type="number" id="setting-count" min="1" max="500" inputmode="numeric">
-            <button class="btn" data-step="5">+5</button>
-          </div>
+          <span>기본 라이브러리 <small>(단어 옆 ＋ 버튼으로 바로 담는 곳)</small></span>
+          <select id="setting-default-lib"></select>
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>학습</h2>
+        <label class="field">
+          <span>하루 목표 <small>(하루에 풀 문제 수 — 테스트 탭과 통계에 표시)</small></span>
+          <select id="setting-daily-goal">
+            <option value="10">10문제</option>
+            <option value="20">20문제</option>
+            <option value="30">30문제</option>
+            <option value="50">50문제</option>
+            <option value="100">100문제</option>
+          </select>
         </label>
       </div>
 
@@ -260,6 +393,14 @@
       </div>
 
       <div class="card">
+        <h2>앱</h2>
+        <p class="hint">화면이 이상하거나 새 버전이 안 보이면 눌러 주세요. 단어 데이터는 지워지지 않아요.</p>
+        <div class="btn-row">
+          <button class="btn" id="refresh-app-btn">앱 새로고침 (캐시 갱신)</button>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>초기화</h2>
         <div class="btn-row">
           <button class="btn" id="reset-stats-btn">모든 통계 초기화</button>
@@ -269,6 +410,33 @@
       <p class="hint center" id="app-version"></p>
     </section>
   </main>
+
+  <!-- 카드 한 장씩 보기 (암기 카드, 단어팩 골라 담기) -->
+  <div id="cards" class="cards-overlay" hidden>
+    <div class="cards-inner">
+      <div class="cards-top">
+        <div><b id="cards-title"></b> <span class="hint" id="cards-progress"></span></div>
+        <button class="btn btn-small" id="cards-close">끝내기</button>
+      </div>
+      <div class="progress-bar"><div id="cards-bar"></div></div>
+      <div class="flashcard" id="flashcard" role="button" tabindex="0" aria-label="카드 뒤집기">
+        <div class="fc-front">
+          <span class="fc-word" id="fc-word"></span>
+          <button class="btn-icon" id="fc-speak" aria-label="발음 듣기">🔊</button>
+        </div>
+        <div class="fc-back" id="fc-back" hidden>
+          <p class="fc-meaning" id="fc-meaning"></p>
+          <p class="fc-memo" id="fc-memo"></p>
+        </div>
+        <p class="fc-hint" id="fc-hint">탭해서 뜻 보기</p>
+      </div>
+      <p class="hint center" id="cards-tally"></p>
+      <div class="cards-actions">
+        <button class="btn btn-large" id="cards-know">알아요</button>
+        <button class="btn btn-large btn-primary" id="cards-dont">몰라요</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 공용 대화상자 -->
   <div id="modal" class="modal" hidden>
@@ -280,17 +448,28 @@
   </div>
 
   <!-- 토스트 메시지 -->
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast" role="status" hidden>
+    <span id="toast-text"></span>
+    <button type="button" class="toast-action" id="toast-action" hidden></button>
+  </div>
 
   <script src="js/storage.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/speech.js"></script>
   <script src="js/samples.js"></script>
   <script src="js/packs.js"></script>
+  <script src="js/dict-data.js"></script>
+  <script src="js/dict.js"></script>
   <script src="js/words.js"></script>
+  <script src="js/review.js"></script>
+  <script src="js/history.js"></script>
+  <script src="js/recommend.js"></script>
   <script src="js/libraries.js"></script>
   <script src="js/list.js"></script>
+  <script src="js/register.js"></script>
   <script src="js/quiz.js"></script>
+  <script src="js/cards.js"></script>
+  <script src="js/stats.js"></script>
   <script src="js/backup.js"></script>
   <script src="js/app.js"></script>
 </body>

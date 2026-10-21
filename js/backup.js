@@ -9,11 +9,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function buildBackupData() {
   return {
     app: 'word-test',
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     settings: state.settings,
     words: state.words,
-    libraries: state.libraries
+    libraries: state.libraries,
+    history: state.history,
+    daily: state.daily
   };
 }
 
@@ -72,14 +74,16 @@ async function exportBackup() {
   showToast('백업 파일을 내보냈습니다.');
 }
 
-/** 가져온 JSON에서 단어·라이브러리 꺼내기 (형식 검사, 버전 1 백업도 지원) */
+/** 가져온 JSON에서 단어·라이브러리·시험 기록 꺼내기 (형식 검사, 버전 1·2 백업도 지원) */
 function parseBackupJson(text) {
   const data = JSON.parse(text);
   const rawWords = Array.isArray(data) ? data : data && Array.isArray(data.words) ? data.words : null;
   if (!rawWords) throw new Error('단어 목록(words)을 찾을 수 없습니다.');
   const words = rawWords.map(normalizeWordRecord).filter(Boolean);
   const libraries = data && Array.isArray(data.libraries) ? data.libraries.map(normalizeLibrary).filter(Boolean) : [];
-  return { words, libraries, settings: data && data.settings ? data.settings : null };
+  const history = data && Array.isArray(data.history) ? data.history.map(normalizeHistoryEntry).filter(Boolean) : [];
+  const daily = data && data.daily && typeof data.daily === 'object' ? normalizeDaily(data.daily) : null;
+  return { words, libraries, history, daily, settings: data && data.settings ? data.settings : null };
 }
 
 /**
@@ -108,12 +112,12 @@ async function importBackupFile(file) {
     await showDialog({ title: '가져오기 실패', message: `올바른 백업 파일이 아닙니다.\n(${e.message})` });
     return;
   }
-  const { words, libraries, settings } = parsed;
+  const { words, libraries, history, daily, settings } = parsed;
   if (words.length === 0) { showToast('파일에 단어가 없습니다.'); return; }
 
   const choice = await showDialog({
     title: '백업 가져오기',
-    message: `파일에 단어 ${words.length}개, 라이브러리 ${libraries.length}개가 있습니다. (현재 단어 ${state.words.length}개)\n\n` +
+    message: `파일에 단어 ${words.length}개, 라이브러리 ${libraries.length}개, 시험 기록 ${history.length}개가 있습니다. (현재 단어 ${state.words.length}개)\n\n` +
       '• 합치기: 현재 단어를 유지하고, 같은 단어는 파일 내용으로 바꿉니다.\n' +
       '• 전체 교체: 현재 단어를 모두 지우고 파일 내용으로 바꿉니다.',
     buttons: [
@@ -129,8 +133,10 @@ async function importBackupFile(file) {
     if (!ok) return;
     state.words = dedupeWords(words);
     state.libraries = libraries;
+    state.history = history.slice(-HISTORY_MAX);
+    if (daily) state.daily = daily;
     pruneLibraryWordIds();
-    if (settings) state.settings = { ...DEFAULT_SETTINGS, ...settings };
+    if (settings) state.settings = normalizeSettings(settings);
     saveSettings();
   } else {
     let added = 0, updated = 0;
@@ -151,10 +157,18 @@ async function importBackupFile(file) {
       }
     });
     mergeLibraries(libraries, idMap);
+    mergeHistory(history, idMap);
+    // 날짜별 학습량: 같은 날이 있으면 큰 쪽을 남김 (같은 백업을 두 번 가져와도 두 배가 되지 않게)
+    if (daily) Object.keys(daily).forEach(k => {
+      const cur = state.daily[k];
+      if (!cur || daily[k].n > cur.n) state.daily[k] = daily[k];
+    });
     showToast(`추가 ${added}개, 갱신 ${updated}개`);
   }
   saveWords();
   saveLibraries();
+  saveHistory();
+  saveDaily();
   refreshAllViews();
   if (choice === 'replace') showToast(`단어 ${state.words.length}개를 가져왔습니다.`);
 }
