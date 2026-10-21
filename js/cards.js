@@ -32,7 +32,9 @@ function renderCard() {
   $('#cards-progress').textContent = `${s.index + 1} / ${s.items.length}`;
   $('#cards-bar').style.width = `${(s.index / s.items.length) * 100}%`;
   $('#fc-word').textContent = it.word;
-  $('#fc-meaning').textContent = it.meanings.join(', ');
+  $('#fc-level').innerHTML = levelBadgeHtml(it.word);
+  // 뒷면: 뜻을 품사별로 (명 곰 · 동 견디다, 참다)
+  $('#fc-meaning').innerHTML = meaningGroupsHtml(it.word, it.meanings);
   $('#fc-memo').textContent = it.memo || '';
   $('#fc-memo').hidden = !it.memo;
   s.flipped = false;
@@ -40,6 +42,7 @@ function renderCard() {
   $('#fc-back').hidden = true;
   $('#fc-hint').hidden = false;
   $('#cards-tally').textContent = `알아요 ${s.known.length} · ${$('#cards-dont').textContent} ${s.unknown.length}`;
+  autoSpeak(it.word);
 }
 
 /** 카드 뒤집기 (뜻 보기 ↔ 단어만) */
@@ -104,7 +107,10 @@ function startFlashcards(libId) {
 /* ---------- 단어팩 골라 담기 ---------- */
 
 function startPackPicking(pack) {
-  const items = shuffle(packWordList(pack)).map(it => {
+  // 난이도 팩은 단어가 많아 아직 안 담은 단어 중 50장씩, 모르는 단어는 그 난이도 라이브러리로
+  const source = pack.level ? shuffle(packItemsNotInLibrary(pack)).slice(0, LEVEL_BATCH) : packWordList(pack);
+  if (!source.length) { showToast(`${pack.name} 단어를 모두 담았어요.`); return; }
+  const items = shuffle(source).map(it => {
     const mine = findWord(it.word);
     return { word: it.word, meanings: mine ? mine.meanings : it.meanings, memo: mine ? mine.memo : '', wordId: mine ? mine.id : null };
   });
@@ -116,6 +122,16 @@ function startPackPicking(pack) {
     onFinish: async (r) => {
       if (!r.unknown.length) {
         if (r.seen) showToast(`${r.seen}장 모두 알아요 — 담을 단어가 없어요.`);
+        return;
+      }
+      if (pack.level) {
+        const okLv = await confirmDialog('라이브러리에 담기', `모르는 단어 ${r.unknown.length}개를 '${pack.name}' 라이브러리에 담을까요?\n(${r.seen}/${r.total}장 확인)`, '담기');
+        if (!okLv) return;
+        const { lib } = addPackItems(pack, r.unknown.map(it => ({ word: it.word, meanings: it.meanings.slice() })));
+        touchLibrary(lib.id);
+        showToast(`'${lib.name}'에 ${r.unknown.length}개 담음`);
+        switchTab('list');
+        openLibrary(lib.id);
         return;
       }
       const ok = await confirmDialog(

@@ -149,13 +149,13 @@ function deleteLibrary(libId, withWords) {
 }
 
 /**
- * 추천 단어팩을 내 라이브러리로 추가
+ * 단어팩의 단어를 그 단어팩 라이브러리에 담기 (라이브러리가 없으면 만듦)
  *  - 이미 있는 단어는 뜻을 바꾸지 않고 라이브러리에만 연결
  */
-function installPack(pack) {
-  const lib = createLibrary({ name: pack.name, desc: pack.desc, color: pack.color, packId: pack.id });
+function addPackItems(pack, items) {
+  const lib = installedLibraryOfPack(pack.id) || createLibrary({ name: pack.name, desc: pack.desc, color: pack.color, packId: pack.id });
   let created = 0;
-  const ids = packWordList(pack).map(item => {
+  const ids = items.map(item => {
     const existing = findWord(item.word);
     if (existing) {
       existing.sample = false; // 단어팩에 들어간 단어는 '예시 단어 지우기'로 지워지지 않게
@@ -169,6 +169,11 @@ function installPack(pack) {
   saveWords();
   addWordsToLibrary(lib.id, ids);
   return { lib, created, linked: ids.length - created };
+}
+
+/** 추천 단어팩(난이도 팩 포함)을 통째로 내 라이브러리에 추가 */
+function installPack(pack) {
+  return addPackItems(pack, packWordList(pack));
 }
 
 function installedLibraryOfPack(packId) {
@@ -212,7 +217,7 @@ function renderLibraryHome() {
       <button class="lib-card" data-lib="${l.id}">
         ${coverHtml(l)}
         <span class="lib-card-name">${escapeHtml(l.name)}</span>
-        <span class="lib-card-meta">${l.packId ? '단어팩 · ' : ''}단어 ${l.wordIds.length}개</span>
+        <span class="lib-card-meta">${l.packId ? (isLevelPackId(l.packId) ? '난이도별 · ' : '단어팩 · ') : ''}단어 ${l.wordIds.length}개</span>
         ${masteryBarHtml(libraryWords(l.id))}
       </button>`)
   ];
@@ -225,6 +230,8 @@ function renderLibraryHome() {
       <span class="lib-card-name">${escapeHtml(a.name)}</span>
       <span class="lib-card-meta">단어 ${autoListWords(a.id).length}개</span>
     </button>`).join('');
+
+  renderLevelSection();
 
   $('#pack-grid').innerHTML = WORD_PACKS.map(p => {
     const installed = installedLibraryOfPack(p.id);
@@ -252,6 +259,7 @@ function openLibrary(libId) {
   $('#lib-home').hidden = true;
   $('#lib-detail').hidden = false;
   $('#list-search').value = '';
+  resetListPaging();
   renderLibraryHero();
   renderList();
   renderRecommendations(true);
@@ -264,7 +272,8 @@ function renderLibraryHero() {
   const lib = isAll || auto ? null : getLibrary(currentLibId);
   const info = isAll ? ALL_COVER : auto ? { name: `${auto.icon} ${auto.name}`, color: auto.color } : lib;
   $('#lib-hero-cover').outerHTML = coverHtml(info, 'lib-cover-large').replace('<div class="lib-cover', '<div id="lib-hero-cover" class="lib-cover');
-  $('#lib-hero-kind').textContent = isAll ? '전체 단어장' : auto ? '자동 목록' : (lib.packId ? '단어팩 라이브러리' : '라이브러리');
+  $('#lib-hero-kind').textContent = isAll ? '전체 단어장' : auto ? '자동 목록'
+    : lib.packId ? (isLevelPackId(lib.packId) ? '난이도별 라이브러리' : '단어팩 라이브러리') : '라이브러리';
   $('#lib-hero-name').textContent = auto ? auto.name : info.name;
   const words = libraryWords(currentLibId);
   const desc = isAll ? '등록한 모든 단어' : auto ? auto.desc : (lib.desc || '');
@@ -349,34 +358,43 @@ async function confirmDeleteLibrary(libId) {
   showLibraryHome();
 }
 
-/** 단어팩 미리보기 → 추가 */
+/** 단어팩(난이도 팩 포함) 미리보기 → 추가 */
 async function openPackPreview(packId) {
-  const pack = WORD_PACKS.find(p => p.id === packId);
+  const pack = findPack(packId);
   if (!pack) return;
   const items = packWordList(pack);
   const installed = installedLibraryOfPack(pack.id);
-  const preview = items.slice(0, 12).map(it =>
+  const isLevel = !!pack.level;
+  // 난이도 팩은 단어가 많아 무작위로 몇 개만 보여 줌
+  const sample = isLevel ? shuffle(items).slice(0, 12) : items.slice(0, 12);
+  const preview = sample.map(it =>
     `<li><b>${escapeHtml(it.word)}</b> ${escapeHtml(it.meanings.join(', '))}</li>`).join('');
+  const mine = myWordKeySet();
+  const mineCount = items.filter(it => mine.has(wordKey(it.word))).length;
+  const libInfo = installed ? ` · '${escapeHtml(installed.name)}'에 ${installed.wordIds.length}개` : '';
   const html = `
     <div class="pack-preview-head">${coverHtml(pack)}<div>
-      <p class="hint">${escapeHtml(pack.desc)}<br>단어 ${items.length}개</p></div></div>
-    <ul class="pack-preview">${preview}<li class="hint">… 외 ${Math.max(0, items.length - 12)}개</li></ul>
-    <p class="hint">이미 등록된 단어는 뜻을 바꾸지 않고 라이브러리에만 연결합니다.
-      <b>골라 담기</b>는 카드를 한 장씩 보며 모르는 단어만 새 라이브러리로 만들어요.</p>`;
+      <p class="hint">${escapeHtml(pack.desc)}<br>단어 ${items.length.toLocaleString()}개 · 내 단어장에 ${mineCount}개${libInfo}</p></div></div>
+    <ul class="pack-preview">${preview}<li class="hint">… 외 ${Math.max(0, items.length - sample.length).toLocaleString()}개</li></ul>
+    <p class="hint">${isLevel
+      ? `<b>골라 담기</b>: 카드 ${LEVEL_BATCH}장을 넘기며 모르는 단어만 담아요. <b>${LEVEL_BATCH}개 담기</b>: 아직 안 담은 단어 ${LEVEL_BATCH}개를 무작위로 담아요. 담은 단어는 '${escapeHtml(pack.name)}' 라이브러리에 모여요.`
+      : '이미 등록된 단어는 뜻을 바꾸지 않고 라이브러리에만 연결합니다. <b>골라 담기</b>는 카드를 한 장씩 보며 모르는 단어만 새 라이브러리로 만들어요.'}</p>`;
 
-  const choice = await showDialog({
-    title: pack.name,
-    html,
-    buttons: [
-      { label: '닫기', value: null },
-      { label: '골라 담기 (카드)', value: 'pick' },
-      installed
-        ? { label: '라이브러리 열기', value: 'open', primary: true }
-        : { label: '통째로 추가', value: 'install', primary: true }
-    ]
-  });
+  const buttons = [
+    { label: '닫기', value: null },
+    { label: '골라 담기 (카드)', value: 'pick' }
+  ];
+  if (isLevel) buttons.push({ label: `${LEVEL_BATCH}개 담기`, value: 'batch', primary: !!installed });
+  buttons.push(installed
+    ? { label: '라이브러리 열기', value: 'open', primary: !isLevel }
+    : { label: isLevel ? `통째로 추가 (${items.length.toLocaleString()}개)` : '통째로 추가', value: 'install', primary: true });
+  const choice = await showDialog({ title: pack.name, html, buttons });
   if (choice === 'open') openLibrary(installed.id);
   if (choice === 'pick') startPackPicking(pack);
+  if (choice === 'batch') {
+    const r = addPackBatch(pack);
+    if (r) { switchTab('list'); openLibrary(r.lib.id); }
+  }
   if (choice === 'install') {
     const { lib, created, linked } = installPack(pack);
     showToast(`새 단어 ${created}개 추가${linked ? `, 기존 단어 ${linked}개 연결` : ''}`, 3000);

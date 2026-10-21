@@ -676,6 +676,11 @@ persecute - 박해하다
 
 /** 단어팩의 단어 목록을 [{ word, meanings }] 형태로 */
 function packWordList(pack) {
-  if (!pack._parsed) pack._parsed = parseBulkText(pack.words).items;
+  if (!pack._parsed) {
+    // 난이도 팩(levels.js)은 사전에서 그 난이도의 단어를 가져옴
+    pack._parsed = pack.level
+      ? levelEntries(pack.level).map(e => ({ word: e.word, meanings: e.meanings.slice() }))
+      : parseBulkText(pack.words).items;
+  }
   return pack._parsed;
 }

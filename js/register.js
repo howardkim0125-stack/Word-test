@@ -1,6 +1,7 @@
 /* ============================================================
  * register.js — 단어 하나 등록 화면
- *  - 영단어 자동완성(단어 + 첫 뜻), 고르면 뜻이 칩으로 채워짐
+ *  - 영단어 자동완성(단어 + 난이도 + 품사별 뜻), 고르면 뜻이 칩으로 채워짐
+ *  - 한글을 입력하면 뜻으로 영단어 찾기 (포기하다 → abandon)
  *  - 뜻 칩: 눌러서 빼기, 직접 입력해 추가 (사용자가 고친 뜻이 사전 뜻보다 우선)
  *  - 입력 중 중복 표시, 사전에 없으면 온라인 참고(영영 뜻·참고용 번역·네이버 사전)
  *  - "방금 등록한 단어" 최근 10개 + 되돌리기
@@ -55,9 +56,19 @@ function hideSuggestions() {
   acIndex = -1;
 }
 
+/** 후보의 뜻 표시: 사전 단어는 품사별로(동 버리다, 포기하다 · 명 방종), 내 단어는 내가 쓴 뜻 */
+function suggestionMeaningHtml(it) {
+  if (it.mine || !it.senses || !it.senses.length) return escapeHtml(it.meanings.slice(0, 3).join(', '));
+  return it.senses.slice(0, 3).map(s => {
+    const ms = s.meanings.slice(0, 2).map(m => (m === it.matched ? `<mark>${escapeHtml(m)}</mark>` : escapeHtml(m)));
+    if (it.matched && s.meanings.includes(it.matched) && !s.meanings.slice(0, 2).includes(it.matched)) ms.unshift(`<mark>${escapeHtml(it.matched)}</mark>`);
+    return `<span class="ac-sense">${POS_LABEL[s.pos] ? `<span class="pos">${POS_LABEL[s.pos]}</span> ` : ''}${ms.join(', ')}</span>`;
+  }).join('');
+}
+
 function renderSuggestions() {
   const val = $('#add-word').value;
-  acItems = val.trim() ? dictSuggest(val, 5) : [];
+  acItems = val.trim() ? dictSuggest(val, 6) : [];
   acIndex = -1;
   // 이미 고른 단어 하나만 남았으면 목록을 띄우지 않음
   const onlyChosen = acItems.length === 1 && chipsSource && wordKey(acItems[0].word) === wordKey(val);
@@ -65,11 +76,13 @@ function renderSuggestions() {
   $('#ac-list').innerHTML = acItems.map((it, i) => `
     <li role="option" id="ac-opt-${i}">
       <button type="button" class="ac-item" data-i="${i}">
-        <b class="ac-word">${escapeHtml(it.word)}</b>
-        ${it.pos && POS_LABEL[it.pos] ? `<span class="pos">${POS_LABEL[it.pos]}</span>` : ''}
-        <span class="ac-mean">${escapeHtml(it.meanings[0] || '')}</span>
-        ${it.from ? `<span class="ac-note">← ${escapeHtml(it.from)}</span>` : ''}
-        ${it.mine ? '<span class="ac-note">내 단어</span>' : ''}
+        <span class="ac-top">
+          <b class="ac-word">${escapeHtml(it.word)}</b>${levelBadgeHtml(it.word)}
+          ${it.from ? `<span class="ac-note">← ${escapeHtml(it.from)}</span>` : ''}
+          ${(it.notes || []).map(n => `<span class="ac-note">${escapeHtml(n)}</span>`).join('')}
+          ${it.mine ? '<span class="ac-note">내 단어</span>' : ''}
+        </span>
+        <span class="ac-mean">${suggestionMeaningHtml(it)}</span>
       </button>
     </li>`).join('');
   $('#ac-list').hidden = false;
@@ -98,7 +111,7 @@ function selectSuggestion(i) {
   $('#add-word').focus();
 }
 
-/** 입력 중 표시: "이미 있음 · 라이브러리 이름" 또는 "원형 study" */
+/** 입력 중 표시: "이미 있음 · 라이브러리 이름" 또는 "원형 study", "leave의 과거·과거분사" */
 function updateWordStatus(extra = '') {
   const el = $('#add-word-status');
   const val = $('#add-word').value.trim();
@@ -110,9 +123,13 @@ function updateWordStatus(extra = '') {
     el.classList.add('dup');
   } else if (extra) {
     el.textContent = extra;
+  } else if (/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(val)) {
+    el.textContent = acItems.length ? '한글 뜻으로 찾은 영단어예요 · 골라 주세요' : '';
   } else {
     const hit = val ? dictLookup(val) : null;
-    el.textContent = hit && hit.from ? `${hit.from} → 원형 "${hit.entry.word}"` : '';
+    const notes = hit && !hit.from ? inflectionNotes(hit.entry.word) : [];
+    el.textContent = hit && hit.from ? `${hit.from} → 원형 "${hit.entry.word}"`
+      : notes.length ? `${hit.entry.word}: ${notes.join(', ')}이기도 해요` : '';
   }
   el.hidden = !el.textContent;
 }
@@ -130,8 +147,8 @@ function scheduleFallback() {
   clearTimeout(fallbackTimer);
   fallbackTimer = setTimeout(() => {
     const v = $('#add-word').value.trim();
-    // 자동완성 후보가 있으면(입력 중인 접두사) 사전에 없는 단어로 보지 않음
-    if (v.length >= 3 && !acItems.length && !dictLookup(v) && !findWord(v) && !chips.length) showFallback(v);
+    // 자동완성 후보가 있으면(입력 중인 접두사) 사전에 없는 단어로 보지 않음, 한글은 온라인에서 찾지 않음
+    if (v.length >= 3 && !/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(v) && !acItems.length && !dictLookup(v) && !findWord(v) && !chips.length) showFallback(v);
   }, 900);
 }
 
@@ -193,6 +210,14 @@ async function handleAddSubmit(e) {
   $('#add-meaning').value = '';
 
   if (!word) { showToast('영단어를 입력하세요.'); wordInput.focus(); return; }
+  // 한글을 입력한 채로 등록하면: 뜻으로 찾은 첫 단어를 고르게 함
+  if (/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(word)) {
+    const found = dictReverse(word, 1)[0];
+    if (found && !chips.length) { applyEntry(withUserMeanings(found)); showToast(`"${found.word}"(으)로 채웠어요. 확인 후 등록하세요.`); return; }
+    showToast('영단어를 입력하세요. (한글 뜻으로 찾으면 목록에서 골라 주세요)');
+    wordInput.focus();
+    return;
+  }
   // 뜻이 비어 있으면 사전에서 채워서 바로 등록
   if (!chips.length) {
     const hit = dictLookup(word);
@@ -333,6 +358,8 @@ function handleWordKeydown(e) {
     if (chips.length || $('#add-meaning').value.trim()) { handleAddSubmit(); return; }
     const val = e.target.value.trim();
     if (!val) return;
+    // 한글로 찾는 중이면 첫 후보를 고름
+    if (/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(val)) { if (acItems.length) selectSuggestion(0); return; }
     const hit = dictLookup(val);
     if (hit) { applyEntry(withUserMeanings(hit.entry)); return; } // 뜻을 채우고, 다음 Enter로 등록
     // 사전에 없는 단어 → 온라인 참고 + 뜻 직접 입력

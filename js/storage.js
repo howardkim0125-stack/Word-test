@@ -26,7 +26,9 @@ const DEFAULT_SETTINGS = {
   dailyGoal: 20,      // 하루 목표 (푼 문제 수)
   hiddenRecs: [],     // '모든 단어'의 추천 단어에서 숨긴 단어 (라이브러리는 라이브러리마다 저장)
   addLibrary: '__default__', // 단어 등록 시 넣을 라이브러리 ID ('' = 없음, '__default__' = 기본 라이브러리)
-  defaultLibrary: ''  // ＋ 버튼으로 담는 기본 라이브러리 ID ('' = "외울 단어"를 필요할 때 자동 생성)
+  defaultLibrary: '', // ＋ 버튼으로 담는 기본 라이브러리 ID ('' = "외울 단어"를 필요할 때 자동 생성)
+  userLevel: 0,       // 내 수준 (0 = 아직 안 고름, 1 초등1 ~ 9 고등3)
+  autoSpeak: false    // 문제·카드가 나올 때 영어 발음 자동 재생
 };
 
 // 앱 전체에서 공유하는 상태
@@ -109,6 +111,9 @@ function normalizeSettings(raw) {
   const goal = parseInt(out.dailyGoal, 10);
   out.dailyGoal = goal > 0 ? goal : DEFAULT_SETTINGS.dailyGoal;
   out.hiddenRecs = Array.isArray(out.hiddenRecs) ? out.hiddenRecs.map(String) : [];
+  const lv = parseInt(out.userLevel, 10);
+  out.userLevel = lv >= 1 && lv <= 9 ? lv : 0;
+  out.autoSpeak = out.autoSpeak === true;
   return out;
 }
 

@@ -11,10 +11,20 @@ function accuracyOf(w) {
   return Math.round(((w.asked - w.wrong) / w.asked) * 100);
 }
 
-/** 검색어(와 숙련도)에 맞는 단어만 고르기 */
-function filterWords(words, query, mastery = '') {
+/** 난이도 필터에 맞는지: '' 전체, 'el'/'mid'/'high' 초등·중등·고등, '1'~'9' 단계, 'none' 사전에 없음 */
+function matchLevelFilter(word, filter) {
+  if (!filter) return true;
+  const lv = dictLevel(word);
+  if (filter === 'none') return !lv;
+  if (/^\d$/.test(filter)) return lv === Number(filter);
+  return !!lv && levelGroupOf(lv).key === filter;
+}
+
+/** 검색어(와 숙련도·난이도)에 맞는 단어만 고르기 */
+function filterWords(words, query, mastery = '', level = '') {
   const q = query.trim().toLowerCase();
   if (mastery) words = words.filter(w => masteryOf(w) === mastery);
+  if (level) words = words.filter(w => matchLevelFilter(w.word, level));
   if (!q) return words;
   return words.filter(w =>
     w.word.toLowerCase().includes(q) ||
@@ -42,6 +52,10 @@ function sortWords(words, sortBy) {
       break;
     case 'wrong':
       a.sort((x, y) => y.wrong - x.wrong || (accuracyOf(x) ?? 101) - (accuracyOf(y) ?? 101));
+      break;
+    case 'level':
+      // 쉬운 단어부터, 사전에 없는 단어는 맨 뒤
+      a.sort((x, y) => (dictLevel(x.word) || 99) - (dictLevel(y.word) || 99) || x.word.localeCompare(y.word, 'en', { sensitivity: 'base' }));
       break;
     default: // recent
       a.sort((x, y) => y.createdAt - x.createdAt);
@@ -148,6 +162,7 @@ function wordItemHtml(w) {
         <div class="word-main">
           <div class="word-head">
             <span class="word-text">${escapeHtml(w.word)}</span>
+            ${levelBadgeHtml(w.word)}
             <span class="mastery-tag m-${m}">${MASTERY_LABEL[m]}${w.markedKnown ? ' ✓' : ''}</span>
             ${w.sample ? '<span class="badge">예시</span>' : ''}
           </div>
@@ -165,9 +180,18 @@ function wordItemHtml(w) {
     </li>`;
 }
 
-/** 지금 화면에 보이는 단어 (검색·숙련도 필터·정렬 반영) */
+/** 지금 화면에 보이는 단어 (검색·숙련도·난이도 필터·정렬 반영) */
 function visibleWords() {
-  return sortWords(filterWords(libraryWords(currentLibId), $('#list-search').value, $('#list-mastery').value), $('#list-sort').value);
+  return sortWords(filterWords(libraryWords(currentLibId), $('#list-search').value, $('#list-mastery').value, $('#list-level').value), $('#list-sort').value);
+}
+
+// 단어가 많은 라이브러리(난이도별 단어 등)는 나눠서 그림
+const LIST_PAGE = 200;
+let listShown = LIST_PAGE;
+
+/** 목록을 처음부터 다시 보여 줄 때 (라이브러리를 열거나 검색·필터·정렬을 바꿀 때) */
+function resetListPaging() {
+  listShown = LIST_PAGE;
 }
 
 /** 현재 라이브러리의 단어 목록 다시 그리기 */
@@ -178,12 +202,15 @@ function renderList() {
   // 지워진 단어는 선택에서도 빼기
   [...selectedIds].forEach(id => { if (!getWordById(id)) selectedIds.delete(id); });
 
-  $('#word-list').innerHTML = words.map(wordItemHtml).join('');
+  $('#word-list').innerHTML = words.slice(0, listShown).map(wordItemHtml).join('');
+  const rest = words.length - Math.min(listShown, words.length);
+  $('#list-more').hidden = rest <= 0;
+  $('#list-more').textContent = `더 보기 (${rest.toLocaleString()}개 남음)`;
   $('#list-empty').hidden = all.length > 0;
   $('#list-empty').textContent = currentLibId === 'all'
     ? '등록된 단어가 없습니다. ‘단어 등록’ 탭이나 아래 단어팩에서 단어를 추가하세요.'
     : '이 라이브러리에 단어가 없습니다. ‘＋ 단어 추가’를 누르거나, 모든 단어에서 ‘라이브러리’ 버튼으로 넣으세요.';
-  const filtered = query.trim() || $('#list-mastery').value;
+  const filtered = query.trim() || $('#list-mastery').value || $('#list-level').value;
   $('#list-count').textContent = all.length === 0 ? '' :
     (filtered ? `검색 결과 ${words.length}개 / 전체 ${all.length}개` : `전체 ${all.length}개`);
   updateSelectBar();
@@ -354,9 +381,12 @@ function initSwipe(list) {
 }
 
 function initListView() {
-  $('#list-search').addEventListener('input', renderList);
-  $('#list-sort').addEventListener('change', renderList);
-  $('#list-mastery').addEventListener('change', renderList);
+  const rerender = () => { resetListPaging(); renderList(); };
+  $('#list-search').addEventListener('input', rerender);
+  $('#list-sort').addEventListener('change', rerender);
+  $('#list-mastery').addEventListener('change', rerender);
+  $('#list-level').addEventListener('change', rerender);
+  $('#list-more').addEventListener('click', () => { listShown += 300; renderList(); });
   $('#select-mode-btn').addEventListener('click', enterSelectMode);
   $('#sel-done').addEventListener('click', () => exitSelectMode());
   $('#sel-all').addEventListener('click', () => selectVisible('all'));
