@@ -9,10 +9,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function buildBackupData() {
   return {
     app: 'word-test',
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     settings: state.settings,
-    words: state.words
+    words: state.words,
+    libraries: state.libraries
   };
 }
 
@@ -71,13 +72,31 @@ async function exportBackup() {
   showToast('백업 파일을 내보냈습니다.');
 }
 
-/** 가져온 JSON에서 단어 배열 꺼내기 (형식 검사) */
+/** 가져온 JSON에서 단어·라이브러리 꺼내기 (형식 검사, 버전 1 백업도 지원) */
 function parseBackupJson(text) {
   const data = JSON.parse(text);
   const rawWords = Array.isArray(data) ? data : data && Array.isArray(data.words) ? data.words : null;
   if (!rawWords) throw new Error('단어 목록(words)을 찾을 수 없습니다.');
   const words = rawWords.map(normalizeWordRecord).filter(Boolean);
-  return { words, settings: data && data.settings ? data.settings : null };
+  const libraries = data && Array.isArray(data.libraries) ? data.libraries.map(normalizeLibrary).filter(Boolean) : [];
+  return { words, libraries, settings: data && data.settings ? data.settings : null };
+}
+
+/**
+ * 가져온 라이브러리 합치기
+ *  - idMap: 파일의 단어 ID → 현재 단어 ID (같은 단어가 이미 있으면 기존 ID)
+ *  - 같은 ID 또는 같은 이름의 라이브러리가 있으면 단어만 합침
+ */
+function mergeLibraries(libraries, idMap) {
+  libraries.forEach(imp => {
+    const wordIds = imp.wordIds.map(id => idMap.get(id)).filter(Boolean);
+    const existing = getLibrary(imp.id) || state.libraries.find(l => l.name === imp.name);
+    if (existing) {
+      existing.wordIds = [...new Set([...existing.wordIds, ...wordIds])];
+    } else {
+      state.libraries.push({ ...imp, wordIds });
+    }
+  });
 }
 
 /** 가져오기: 합치기 또는 전체 교체 */
@@ -89,12 +108,12 @@ async function importBackupFile(file) {
     await showDialog({ title: '가져오기 실패', message: `올바른 백업 파일이 아닙니다.\n(${e.message})` });
     return;
   }
-  const { words, settings } = parsed;
+  const { words, libraries, settings } = parsed;
   if (words.length === 0) { showToast('파일에 단어가 없습니다.'); return; }
 
   const choice = await showDialog({
     title: '백업 가져오기',
-    message: `파일에 단어 ${words.length}개가 있습니다. (현재 ${state.words.length}개)\n\n` +
+    message: `파일에 단어 ${words.length}개, 라이브러리 ${libraries.length}개가 있습니다. (현재 단어 ${state.words.length}개)\n\n` +
       '• 합치기: 현재 단어를 유지하고, 같은 단어는 파일 내용으로 바꿉니다.\n' +
       '• 전체 교체: 현재 단어를 모두 지우고 파일 내용으로 바꿉니다.',
     buttons: [
@@ -109,25 +128,33 @@ async function importBackupFile(file) {
     const ok = await confirmDialog('전체 교체', `현재 단어 ${state.words.length}개가 모두 삭제됩니다. 계속할까요?`, '교체', true);
     if (!ok) return;
     state.words = dedupeWords(words);
+    state.libraries = libraries;
+    pruneLibraryWordIds();
     if (settings) state.settings = { ...DEFAULT_SETTINGS, ...settings };
     saveSettings();
   } else {
     let added = 0, updated = 0;
+    const idMap = new Map();
     words.forEach(w => {
       const existing = findWord(w.word);
       if (existing) {
         // 같은 단어: 파일 내용(뜻·메모·통계)으로 바꾸되 ID는 유지
         Object.assign(existing, { ...w, id: existing.id });
+        idMap.set(w.id, existing.id);
         updated++;
       } else {
         // ID가 겹치지 않도록 새 ID 부여
-        state.words.push({ ...w, id: getWordById(w.id) ? makeId() : w.id });
+        const id = getWordById(w.id) ? makeId() : w.id;
+        state.words.push({ ...w, id });
+        idMap.set(w.id, id);
         added++;
       }
     });
+    mergeLibraries(libraries, idMap);
     showToast(`추가 ${added}개, 갱신 ${updated}개`);
   }
   saveWords();
+  saveLibraries();
   refreshAllViews();
   if (choice === 'replace') showToast(`단어 ${state.words.length}개를 가져왔습니다.`);
 }

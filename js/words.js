@@ -48,6 +48,33 @@ function overwriteWord(existing, { word, meanings, memo = '' }) {
 function deleteWord(id) {
   state.words = state.words.filter(w => w.id !== id);
   saveWords();
+  removeWordFromAllLibraries(id);
+}
+
+/* ---------- 저장할 라이브러리 ---------- */
+
+/** 등록 화면의 '저장할 라이브러리' 선택 상자 갱신 */
+function renderAddLibrarySelect() {
+  fillLibrarySelect($('#add-library'), { selected: state.settings.addLibrary, includeNone: true, includeNew: true });
+}
+
+/** 선택된 라이브러리에 단어 넣기. 넣은 라이브러리 이름 반환 (없으면 '') */
+function addToTargetLibrary(wordIds) {
+  const lib = getLibrary(state.settings.addLibrary);
+  if (!lib || wordIds.length === 0) return '';
+  addWordsToLibrary(lib.id, wordIds);
+  return lib.name;
+}
+
+async function handleAddLibraryChange(e) {
+  if (e.target.value === '__new__') {
+    const lib = await openLibraryDialog();
+    state.settings.addLibrary = lib ? lib.id : state.settings.addLibrary;
+  } else {
+    state.settings.addLibrary = e.target.value;
+  }
+  saveSettings();
+  renderAddLibrarySelect();
 }
 
 /* ---------- 단어 하나 등록 ---------- */
@@ -74,12 +101,17 @@ async function handleAddSubmit(e) {
     );
     if (!ok) return;
     overwriteWord(existing, { word, meanings, memo });
-    showToast(`"${word}" 덮어썼습니다.`);
+    saveWords();
+    const libName = addToTargetLibrary([existing.id]);
+    showToast(`"${word}" 덮어썼습니다.` + (libName ? ` → ${libName}` : ''));
   } else {
-    state.words.push(createWordRecord({ word, meanings, memo }));
-    showToast(`"${word}" 등록했습니다.`);
+    const rec = createWordRecord({ word, meanings, memo });
+    state.words.push(rec);
+    saveWords();
+    const libName = addToTargetLibrary([rec.id]);
+    showToast(`"${word}" 등록했습니다.` + (libName ? ` → ${libName}` : ''));
   }
-  saveWords();
+  renderAddLibrarySelect(); // 단어 수 갱신
 
   // 다음 단어를 바로 입력할 수 있게 비우고 포커스
   wordInput.value = '';
@@ -150,12 +182,16 @@ async function handleBulkAdd() {
     overwrite = choice === 'overwrite';
   }
 
-  fresh.forEach(it => state.words.push(createWordRecord(it)));
+  const newIds = fresh.map(it => { const rec = createWordRecord(it); state.words.push(rec); return rec.id; });
   if (overwrite) dupes.forEach(it => overwriteWord(findWord(it.word), it));
   saveWords();
+  // 건너뛴 기존 단어도 선택한 라이브러리에는 넣어 줌 (뜻은 그대로)
+  const libName = addToTargetLibrary([...newIds, ...dupes.map(it => findWord(it.word).id)]);
+  renderAddLibrarySelect();
 
   let msg = `새 단어 ${fresh.length}개 등록`;
   if (dupes.length) msg += overwrite ? `, ${dupes.length}개 덮어씀` : `, ${dupes.length}개 건너뜀`;
+  if (libName) msg += ` → ${libName}`;
   textarea.value = '';
 
   if (errors.length) {
@@ -190,12 +226,15 @@ async function removeSampleWords() {
   if (!ok) return;
   state.words = state.words.filter(w => !w.sample);
   saveWords();
+  pruneLibraryWordIds();
+  saveLibraries();
   showToast(`예시 단어 ${count}개를 삭제했습니다.`);
 }
 
 function initAddView() {
   $('#add-form').addEventListener('submit', handleAddSubmit);
   $('#bulk-add-btn').addEventListener('click', handleBulkAdd);
+  $('#add-library').addEventListener('change', handleAddLibraryChange);
   // 영단어 입력 후 Enter → 뜻 입력칸으로 이동
   $('#add-word').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('#add-meaning').focus(); }

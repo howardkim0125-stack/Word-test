@@ -5,6 +5,7 @@
 
 const STORAGE_KEYS = {
   words: 'wt.words',
+  libraries: 'wt.libraries',
   settings: 'wt.settings',
   meta: 'wt.meta' // 마지막 백업 시각, 최초 사용 시각 등
 };
@@ -13,12 +14,15 @@ const DEFAULT_SETTINGS = {
   count: 20,          // 출제 개수
   direction: 'en2ko', // en2ko | ko2en | mix
   format: 'input',    // input(주관식) | choice(객관식)
-  mode: 'random'      // random | weighted
+  mode: 'random',     // random | weighted
+  testLibrary: 'all', // 출제 범위: 'all'(모든 단어) 또는 라이브러리 ID
+  addLibrary: ''      // 단어 등록 시 넣을 라이브러리 ID ('' = 없음)
 };
 
 // 앱 전체에서 공유하는 상태
 const state = {
   words: [],
+  libraries: [],
   settings: { ...DEFAULT_SETTINGS },
   meta: { lastBackup: null, firstUse: null }
 };
@@ -50,6 +54,9 @@ function writeJSON(key, value) {
 function loadAll() {
   const words = readJSON(STORAGE_KEYS.words, []);
   state.words = Array.isArray(words) ? words.map(normalizeWordRecord).filter(Boolean) : [];
+  const libs = readJSON(STORAGE_KEYS.libraries, []);
+  state.libraries = Array.isArray(libs) ? libs.map(normalizeLibrary).filter(Boolean) : [];
+  pruneLibraryWordIds();
   state.settings = { ...DEFAULT_SETTINGS, ...readJSON(STORAGE_KEYS.settings, {}) };
   state.meta = { lastBackup: null, firstUse: null, ...readJSON(STORAGE_KEYS.meta, {}) };
   if (!state.meta.firstUse) {
@@ -59,6 +66,7 @@ function loadAll() {
 }
 
 function saveWords() { return writeJSON(STORAGE_KEYS.words, state.words); }
+function saveLibraries() { return writeJSON(STORAGE_KEYS.libraries, state.libraries); }
 function saveSettings() { return writeJSON(STORAGE_KEYS.settings, state.settings); }
 function saveMeta() { return writeJSON(STORAGE_KEYS.meta, state.meta); }
 
@@ -86,6 +94,30 @@ function normalizeWordRecord(r) {
     lastTested: r.lastTested || null,
     sample: !!r.sample
   };
+}
+
+/**
+ * 라이브러리 레코드 형식 맞추기
+ * 형식: { id, name, desc, color(표지 색 번호), wordIds[], createdAt, packId(추천 단어팩에서 왔으면 그 ID) }
+ *  - 단어 하나가 여러 라이브러리에 들어갈 수 있음 (스포티파이 플레이리스트처럼)
+ */
+function normalizeLibrary(l) {
+  if (!l || typeof l.name !== 'string' || !l.name.trim()) return null;
+  return {
+    id: l.id || makeId(),
+    name: l.name.trim(),
+    desc: typeof l.desc === 'string' ? l.desc : '',
+    color: Number.isInteger(l.color) ? l.color : 0,
+    wordIds: Array.isArray(l.wordIds) ? [...new Set(l.wordIds.map(String))] : [],
+    createdAt: l.createdAt || Date.now(),
+    packId: l.packId || null
+  };
+}
+
+/** 라이브러리에 남아 있는, 이미 삭제된 단어 ID 정리 */
+function pruneLibraryWordIds() {
+  const ids = new Set(state.words.map(w => w.id));
+  state.libraries.forEach(l => { l.wordIds = l.wordIds.filter(id => ids.has(id)); });
 }
 
 /** 고유 ID 생성 */
